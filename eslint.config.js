@@ -33,6 +33,32 @@ export default defineConfig(
     },
   },
   {
+    // Spec 01, section 6: the unscoped client (no organization filter) is restricted to the platform
+    // admin module, authentication and jobs. Everything else uses the tenant-scoped PrismaService.
+    files: ['src/**/*.ts'],
+    ignores: ['src/prisma/**', 'src/admin/**', 'src/auth/**', 'src/jobs/**', 'src/**/*.spec.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/platform-prisma.service.js'],
+              message:
+                'PlatformPrismaService has no organization filter: only admin, auth and jobs may use it (spec 01, section 6). Use PrismaService.',
+            },
+            {
+              group: ['**/generated/prisma/client.js'],
+              importNames: ['PrismaClient'],
+              message:
+                'Do not create Prisma clients: inject PrismaService (one pool of 7 connections).',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.js'],
     extends: [tseslint.configs.disableTypeChecked],
   },

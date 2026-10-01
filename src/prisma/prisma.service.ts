@@ -1,31 +1,72 @@
-import { Inject, Injectable, type OnModuleDestroy } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
-import { APP_ENV } from '../config/config.module.js';
-import type { Env } from '../config/env.js';
-import { PrismaClient } from '../generated/prisma/client.js';
+import { Injectable } from '@nestjs/common';
+import type { ITXClientDenyList } from '@prisma/client/runtime/client';
 
-/** The API pool uses at most 7 of the 50 connections of the shared Postgres (plan 2.1, RN-01.16). */
-export const DB_POOL_MAX = 7;
-const DB_CONNECTION_TIMEOUT_MS = 2_000;
+import { currentOrganizationId } from '../context/request-context.js';
+import type { PrismaClient } from '../generated/prisma/client.js';
+import { PlatformPrismaService } from './platform-prisma.service.js';
+import { tenantScope } from './tenant-scope.extension.js';
+
+export function createTenantClient(
+  base: PrismaClient,
+  getOrganizationId: () => string | null = currentOrganizationId,
+) {
+  return base.$extends(tenantScope(getOrganizationId));
+}
+
+export type TenantPrismaClient = ReturnType<typeof createTenantClient>;
+
+/** A tenant client or a transaction opened from it: what services use to query (`prisma.db`). */
+export type TenantDb = Omit<TenantPrismaClient, ITXClientDenyList>;
 
 /**
- * Prisma client backed by the `pg` driver adapter. Connections are opened lazily,
- * so the app (and `pnpm openapi`) boots without a reachable database.
+ * Ambient transaction: lets an interceptor (idempotency) and the services of the same request share
+ * one database transaction without passing `tx` through every call.
+ */
+const ambientTransaction = new AsyncLocalStorage<TenantDb>();
+
+export interface TransactionOptions {
+  /** Milliseconds; Prisma's default is 5 s. */
+  timeout?: number;
+}
+
+/**
+ * Database access for the API, filtered by organization (spec 01, section 6).
+ *
+ * Every query on a tenant model (TENANT_MODELS) gets the organization of the request context in
+ * `where` and `data`, and fails without one. Non-tenant models (audit, sessions…) pass through.
+ *
+ * - `prisma.db`: the current ambient transaction, if any, otherwise the client. Use it for queries.
+ * - `prisma.transaction(fn)`: opens a transaction, or joins the ambient one (e.g. the transaction
+ *   the idempotency interceptor opened for this request), so the action, its audit row and the
+ *   stored idempotent response commit together.
+ * - Raw SQL (`$queryRaw`, `$executeRaw`) is NOT filtered: add `organization_id = ${organizationId}`
+ *   by hand, and point it out in the PR.
  */
 @Injectable()
-export class PrismaService extends PrismaClient implements OnModuleDestroy {
-  constructor(@Inject(APP_ENV) env: Env) {
-    super({
-      adapter: new PrismaPg({
-        connectionString: env.DATABASE_URL,
-        max: DB_POOL_MAX,
-        connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
-      }),
-    });
+export class PrismaService {
+  readonly client: TenantPrismaClient;
+
+  constructor(platform: PlatformPrismaService) {
+    this.client = createTenantClient(platform);
   }
 
-  async onModuleDestroy(): Promise<void> {
-    await this.$disconnect();
+  get db(): TenantDb {
+    return ambientTransaction.getStore() ?? this.client;
+  }
+
+  async transaction<T>(
+    fn: (tx: TenantDb) => Promise<T>,
+    options: TransactionOptions = {},
+  ): Promise<T> {
+    const ambient = ambientTransaction.getStore();
+    if (ambient) {
+      return fn(ambient);
+    }
+    return this.client.$transaction(
+      (tx) => ambientTransaction.run(tx, () => fn(tx)),
+      options.timeout === undefined ? undefined : { timeout: options.timeout },
+    );
   }
 }

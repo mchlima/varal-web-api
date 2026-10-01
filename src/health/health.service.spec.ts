@@ -4,7 +4,7 @@ import type { PrismaService } from '../prisma/prisma.service.js';
 import { HealthService } from './health.service.js';
 
 function serviceWith(queryRaw: () => Promise<unknown>): HealthService {
-  return new HealthService({ $queryRaw: vi.fn(queryRaw) } as unknown as PrismaService);
+  return new HealthService({ db: { $queryRaw: vi.fn(queryRaw) } } as unknown as PrismaService);
 }
 
 describe('HealthService', () => {

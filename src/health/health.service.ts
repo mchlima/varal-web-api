@@ -24,7 +24,7 @@ export class HealthService {
           reject(new Error('database check timed out'));
         }, DB_CHECK_TIMEOUT_MS);
       });
-      await Promise.race([this.prisma.$queryRaw`SELECT 1`, timeout]);
+      await Promise.race([this.prisma.db.$queryRaw`SELECT 1`, timeout]);
       return true;
     } catch (error) {
       this.logger.warn(

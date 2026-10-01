@@ -14,6 +14,8 @@ export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
     path: 'prisma/migrations',
+    // `prisma db seed` runs the same script as `pnpm db:seed`.
+    seed: 'node --import @swc-node/register/esm-register scripts/seed.ts',
   },
   datasource: {
     // Optional for `prisma generate`; required by `migrate dev` / `migrate deploy`.

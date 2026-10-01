@@ -1,6 +1,96 @@
 {
   "components": {
     "schemas": {
+      "ActorType": {
+        "description": "Quem fez a ação registrada na auditoria.",
+        "enum": [
+          "owner",
+          "staff",
+          "platform_admin",
+          "system"
+        ],
+        "type": "string"
+      },
+      "EmailStatus": {
+        "description": "Situação de um envio de e-mail.",
+        "enum": [
+          "queued",
+          "sent",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "EmailType": {
+        "description": "Tipos de e-mail do MVP (spec 01, seção 9).",
+        "enum": [
+          "owner_invite",
+          "owner_password_reset",
+          "staff_password_reset",
+          "admin_invite",
+          "admin_password_reset"
+        ],
+        "type": "string"
+      },
+      "ErrorCode": {
+        "description": "Códigos genéricos de erro; cada módulo pode ter os seus.",
+        "enum": [
+          "VALIDATION_FAILED",
+          "BAD_REQUEST",
+          "UNAUTHENTICATED",
+          "FORBIDDEN",
+          "NOT_FOUND",
+          "METHOD_NOT_ALLOWED",
+          "CONFLICT",
+          "ALREADY_EXISTS",
+          "VERSION_CONFLICT",
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_REQUEST_IN_PROGRESS",
+          "PAYLOAD_TOO_LARGE",
+          "RATE_LIMITED",
+          "INTERNAL_ERROR",
+          "SERVICE_UNAVAILABLE"
+        ],
+        "type": "string"
+      },
+      "ErrorResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "additionalProperties": false,
+            "properties": {
+              "code": {
+                "description": "Código estável, em inglês (ex.: `NOT_FOUND`, `TAB_ALREADY_CLOSED`).",
+                "examples": [
+                  "VALIDATION_FAILED"
+                ],
+                "type": "string"
+              },
+              "details": {
+                "additionalProperties": {},
+                "description": "Dados extras do erro; em `VALIDATION_FAILED`, `{ fields: ValidationIssue[] }`.",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "message": {
+                "description": "Mensagem em português, pode ser mostrada ao usuário.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "code",
+              "message",
+              "details"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -21,6 +111,69 @@
         "required": [
           "status",
           "db"
+        ],
+        "type": "object"
+      },
+      "PaginationQuery": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "limit"
+        ],
+        "type": "object"
+      },
+      "SubscriptionStatus": {
+        "description": "Situação da assinatura da organização (RN-02.11).",
+        "enum": [
+          "pilot",
+          "active",
+          "suspended",
+          "canceled"
+        ],
+        "type": "string"
+      },
+      "ValidationErrorDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationIssue"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "Mensagem em português.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Caminho do campo, com pontos (ex.: `items.0.quantity`).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "message"
         ],
         "type": "object"
       }
@@ -48,6 +201,16 @@
               }
             },
             "description": "API is up; `db` reports the database status."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
           }
         },
         "tags": [
