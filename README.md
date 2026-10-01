@@ -67,7 +67,7 @@ Schema em [`prisma/schema.prisma`](prisma/schema.prisma), migration em `prisma/m
 - `organizations.access_code`: 6 caracteres sem 0/O e 1/I (`CHECK`); gerado por `generateAccessCode()`.
 - E-mails de donos e admins sempre em minúsculas (`CHECK`), únicos globalmente.
 - `staff_members`: índice único `(organization_id, lower(username))` e `CHECK` do formato do username.
-- `staff_unit_permissions`: chaves estrangeiras compostas com `organization_id`, para colaborador e unidade serem sempre da mesma organização. `station_ids` ainda sem FK (estações vêm na spec 03).
+- `staff_unit_permissions`: chaves estrangeiras compostas com `organization_id`, para colaborador e unidade serem sempre da mesma organização. `station_ids` (array, sem FK) é validado na escrita e filtrado na leitura (seção [Configuração da unidade](#configuração-da-unidade-spec-03)).
 - `audit_logs`: somente inserção; um trigger recusa `UPDATE` e `DELETE`.
 
 ### Contexto da requisição
@@ -120,7 +120,7 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 ### Seed
 
-`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça", dono `dono@varal.local`, colaboradores `ana` e `bruno` e admin `admin@varal.local`. Estações e fluxo padrão vêm com a spec 03.
+`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça" com o template padrão (Balcão, Cozinha, Balcão de entrega; Recebido → Preparando → Pronto → Entregue) e um cardápio de espetos (Espetos com "Ponto da carne" obrigatório, "Acompanhamentos" e "Retirar"; Porções; Bebidas no Balcão de entrega), dono `dono@varal.local`, colaboradores `ana` (Balcão e Balcão de entrega, opera caixa) e `bruno` (Cozinha) e admin `admin@varal.local`.
 
 **Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
 
@@ -206,22 +206,24 @@ const socket = io(API_BASE_URL, {
 
 ### Salas
 
-| Sala                  | Quem entra (automaticamente, no handshake)                                                                        |
-| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `unit:{unitId}`       | Dono: todas as unidades **ativas** da organização. Colaborador: as unidades ativas de `staff_unit_permissions`    |
-| `station:{stationId}` | Colaborador: as estações de `station_ids` dessas unidades. Dono: nenhuma até a spec 03 criar a tabela de estações |
+| Sala                  | Quem entra (automaticamente, no handshake)                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `unit:{unitId}`       | Dono: todas as unidades **ativas** da organização. Colaborador: as unidades ativas de `staff_unit_permissions`              |
+| `station:{stationId}` | Dono: todas as estações ativas das unidades ativas. Colaborador: as estações ativas de `station_ids`, só da própria unidade |
 
 - As salas são calculadas pelo cliente do Prisma filtrado pela organização da sessão; nunca entra sala de outra organização (CA-01.02).
 - **Opcional:** `socket.emitWithAck('rooms.leave', { room })` sai de uma sala (ex.: estações que o aparelho não está operando) e `rooms.join` volta a ela, conferida no servidor contra as permissões atuais. A resposta é `RealtimeRoomAck`: `{ ok: true, rooms }` ou `{ ok: false, error }` com `ROOM_FORBIDDEN` (sala inexistente, de outra organização ou sem permissão; mesma resposta nos três casos) ou `VALIDATION_FAILED`.
 - Uma sala interna por sessão (`session:{id}`) serve para encerrar os sockets dela; o cliente não consegue entrar nela.
-- As salas são fixadas na conexão. Mudança de permissão (spec 03) vale na próxima conexão; quem a fizer deve chamar `RealtimeService.endSessions` ou revogar as sessões se precisar efeito imediato.
+- Uma sala interna por usuário (`subject:{tipo}:{id}`) serve para reconectar todos os aparelhos dele quando o acesso muda.
+- As salas são fixadas na conexão. Quando o acesso muda (spec 03: permissões do colaborador, unidade ou estação criada, ativada, desativada ou com tipo trocado), `RealtimeService.refreshAccess` manda `session.access_changed` e desconecta, depois do commit; a sessão continua válida, e o app busca `GET /auth/me` e reconecta, entrando nas salas novas.
 
 ### Desconexão
 
-| Evento recebido antes da desconexão                         | Quando                                                                                                             | O que o app faz                                                             |
-| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
-| `session.revoked` (`EventSessionRevoked`, `data.reason`)    | Logout, troca ou redefinição de senha, desativação, novo login no aparelho, reuso do token de renovação (CA-01.05) | Volta para o login                                                          |
-| `session.expired` (`EventSessionExpired`, `data.expiredAt`) | Venceu o token de acesso usado no handshake (15 min)                                                               | `POST /auth/refresh` e `socket.connect()` (o navegador manda o cookie novo) |
+| Evento recebido antes da desconexão                                   | Quando                                                                                                             | O que o app faz                                                             |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `session.revoked` (`EventSessionRevoked`, `data.reason`)              | Logout, troca ou redefinição de senha, desativação, novo login no aparelho, reuso do token de renovação (CA-01.05) | Volta para o login                                                          |
+| `session.expired` (`EventSessionExpired`, `data.expiredAt`)           | Venceu o token de acesso usado no handshake (15 min)                                                               | `POST /auth/refresh` e `socket.connect()` (o navegador manda o cookie novo) |
+| `session.access_changed` (`EventSessionAccessChanged`, `data.reason`) | O acesso mudou (spec 03): `permissions_changed`, `unit_changed`, `stations_changed`                                | `GET /auth/me` e `socket.connect()`                                         |
 
 Nos dois casos o servidor desconecta em seguida e o cliente recebe `disconnect` com motivo `io server disconnect`, no qual o Socket.IO **não** reconecta sozinho. Se o evento se perder, trate `io server disconnect` como `session.expired`: tente renovar; se a renovação falhar, login. As outras quedas (rede, servidor reiniciando) reconectam sozinhas.
 
@@ -230,7 +232,7 @@ A revogação chega pelo evento interno `auth.sessions_revoked` (`AuthEvents`), 
 ### Eventos (contrato para o app)
 
 - Nome do evento no Socket.IO = `type` (ex.: `order.created`, spec 04). Envelope de todo evento de unidade ou estação: `{ type, organizationId, unitId, occurredAt, version, data }` (seção 10).
-- Cada evento é um schema zod publicado no `openapi.json` como `Event…` (RN-01.10). Os eventos de negócio entram com as specs 03, 04 e 05; nesta fase só existem `EventSessionRevoked` e `EventSessionExpired` (eventos da sessão, sem unidade nem versão).
+- Cada evento é um schema zod publicado no `openapi.json` como `Event…` (RN-01.10). Eventos da sessão (sem unidade nem versão): `EventSessionRevoked`, `EventSessionExpired`, `EventSessionAccessChanged`. Eventos da spec 03 na seção [Configuração da unidade](#configuração-da-unidade-spec-03); os das specs 04 e 05 entram com elas.
 - **RN-01.05:** ao conectar e a cada reconexão, o app primeiro busca o estado atual por REST (comandas abertas, fila da estação) e só depois aplica eventos; eventos guardados durante a busca são aplicados em seguida. Eventos perdidos na desconexão nunca são necessários: o servidor não reenvia nada (sem connection state recovery).
 - O app ignora evento com `version` menor ou igual à do registro que já tem (o REST pode ter trazido um estado mais novo que o evento).
 
@@ -297,6 +299,54 @@ O `openapi.json` na raiz é o contrato consumido pelos apps (RN-01.09). Todo PR 
 
 - Rotas: schemas zod com `.meta({ id })` viram `components.schemas`; o corpo usa `@Body({ schema })` e a resposta `@ApiOkResponse({ standardSchema })`.
 - Enums de estado e eventos em tempo real que não aparecem em rotas entram em `src/openapi/contract-schemas.ts` (eventos com `defineEvent('Event…', schema)`, RN-01.10).
+
+## Configuração da unidade (spec 03)
+
+Módulos [`src/units`](src/units) (unidades, estações, fluxo, template, roteamento, acesso), [`src/menu`](src/menu) (cardápio) e [`src/staff`](src/staff) (colaboradores e acesso da equipe). Todas as rotas exigem a sessão do app; as de configuração só aceitam o **dono** (`OwnerOnly()`: colaborador recebe 403 `FORBIDDEN`). Exceções: `GET /units/{id}/menu` (dono e colaboradores da unidade) e esgotado (dono e colaboradores com estação na unidade, RN-03.11). Id de outra organização (ou que não é UUID) é 404, como inexistente (CA-01.02). Erros do módulo no enum `SetupErrorCode`.
+
+| Rota                                                                                                                      | O quê                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /units`, `PATCH /units/{id}`                                                                                    | Unidades (paginado); criar aplica o template; `lateAfterMinutes` de 1 a 240 (padrão 15); `version` opcional no `PATCH` |
+| `GET/POST /units/{id}/stations`, `PATCH /stations/{id}`                                                                   | Estações (`counter`, `queue`), nunca apagadas, só desativadas                                                          |
+| `GET/PUT /units/{id}/workflow`                                                                                            | Fluxo completo, salvo de uma vez e validado (RN-03.05 a 03.07)                                                         |
+| `GET /units/{id}/menu`                                                                                                    | Cardápio em ordem, com estação de preparo resolvida e `version`                                                        |
+| `POST /categories`, `PATCH /categories/{id}`, `PUT /units/{id}/categories/order`                                          | Categorias e ordenação                                                                                                 |
+| `POST /products`, `PATCH /products/{id}`, `PUT /categories/{id}/products/order`                                           | Produtos (`priceCents` inteiro ≥ 0) e ordenação                                                                        |
+| `POST/DELETE /products/{id}/sold-out`                                                                                     | Esgotado                                                                                                               |
+| `POST /modifier-groups` (com as opções), `PATCH/DELETE /modifier-groups/{id}`, `POST /modifiers`, `PATCH /modifiers/{id}` | Modificadores                                                                                                          |
+| `GET/POST /staff`, `PATCH /staff/{id}`, `PUT /staff/{id}/permissions`                                                     | Colaboradores e permissões por unidade                                                                                 |
+| `POST /staff/{id}/password-reset`, `PUT /staff/{id}/password`                                                             | Link de redefinição (copiar, WhatsApp, e-mail opcional) e senha definida pelo dono                                     |
+| `GET /organization/access`                                                                                                | Código, link `{PANEL_URL}/e/{code}` e QR em SVG                                                                        |
+
+`Idempotency-Key` é aceito nas criações (`POST`) e no esgotado (feito do aparelho, pela fila offline). O link de redefinição **não** é idempotente: a resposta guardaria o token em claro.
+
+### Decisões
+
+- **Template padrão (RN-03.03, CA-03.01):** `UnitTemplateService.applyDefaultTemplate(tx, { organizationId, unitId })` cria Balcão (`counter`), Cozinha e Balcão de entrega (`queue`) e as etapas Recebido e Preparando (`product_station`), Pronto (`fixed_station`, Balcão de entrega) e Entregue (`none`, final). É idempotente (só aplica numa unidade sem estações nem etapas, com `SELECT … FOR UPDATE` na unidade) e aceita a transação do cliente com tenant ou do cliente da plataforma, porque toda consulta nomeia a organização. Roda na criação de unidade pelo dono (`POST /units`) e no seed.
+- **Integração com a spec 02:** ao criar a organização e a primeira unidade, o admin chama `UnitTemplateService.applyDefaultTemplate(tx, { organizationId, unitId })` (exportado pelo `UnitsModule`) na mesma transação do `PlatformPrismaService`.
+- **Fluxo:** `PUT` substitui o fluxo inteiro, na ordem enviada. Etapas enviadas com `id` são atualizadas no lugar; as que ficaram de fora são **arquivadas** (`archived_at`), nunca apagadas, porque itens de turnos passados apontam para elas (spec 04). O índice único `(unit_id, sort_order)` vale só para as não arquivadas. Validação pura em `validateWorkflow` (`src/units/workflow-rules.ts`): 2 a 8 etapas, só a última com `none`, `fixed_station` numa estação `queue` ativa da unidade, nomes sem repetir; os problemas voltam em `INVALID_WORKFLOW` com `details.issues` (CA-03.02). O `PUT` incrementa `units.version` primeiro (trava a linha e responde `VERSION_CONFLICT` se o app mandou `version` antiga).
+- **Roteamento (RN-03.08, CA-03.04):** funções puras em `src/units/routing.ts`, para a spec 04: `resolvePrepStationId(product, category)` (a do produto, senão a da categoria), `isValidPrepStation` (estação `queue` ativa) e `stationForStage(stage, prepStationId)`. Toda categoria nova recebe a Cozinha (ou a primeira estação de fila ativa). As FKs compostas `(organization_id, unit_id, station_id)` garantem no banco que categoria, produto e etapa apontam para estação da mesma unidade.
+- **Estações em uso:** uma estação usada por etapa `fixed_station`, categoria ou produto não pode ser desativada nem virar `counter` (`STATION_IN_USE`); a unidade mantém uma `counter` e uma `queue` ativas (`STATION_KIND_REQUIRED`, RN-03.04).
+- **Turno aberto (RN-03.02, RN-03.07, CA-03.03):** `OpenShiftChecker` responde `false` até existirem turnos. A spec 04 troca o provider no `UnitsModule` por uma consulta em `shifts`; aí estações, fluxo e desativação da unidade passam a responder 409 `SHIFT_OPEN`. Cardápio e esgotado continuam liberados com turno aberto (RN-03.11, RN-03.12).
+- **Permissões e `station_ids`:** mantido o array de `staff_unit_permissions` (contrato da spec 01), sem tabela de junção. Estações nunca são apagadas, então nenhum id fica órfão; a escrita (`PUT /staff/{id}/permissions`) só aceita estações **ativas da mesma unidade** (`INVALID_REFERENCE`), e a leitura (`/auth/me`, salas do tempo real, lista de colaboradores) mantém só as estações ativas daquela unidade (`permittedStations`). Desativar uma estação tira o acesso a ela sem reescrever as permissões; reativar devolve.
+- **RN-03.16:** colaborador sem nenhuma unidade ativa não entra: com a senha certa, o login responde 403 `STAFF_WITHOUT_UNIT` (senha errada continua `INVALID_STAFF_CREDENTIALS`, nada é revelado antes da senha). Tirar todas as unidades de um colaborador encerra as sessões dele (`staff_access_removed`).
+- **Mudança de permissão vale na hora (spec 01, seção 10):** o HTTP já confere as permissões no banco a cada requisição; no tempo real, `refreshAccess` reconecta os aparelhos do colaborador (`session.access_changed`). Desativar (RN-03.17), definir a senha (RN-03.19) ou tirar todas as unidades revogam as sessões (`session.revoked`).
+- **Esgotado (RN-03.11):** dono ou colaborador com pelo menos uma estação ativa da unidade; repetir o mesmo estado não muda nada nem emite evento. Chega aos balcões por `product.sold_out_changed` (CA-03.05).
+- **Cardápio para o colaborador (RN-03.10):** só categorias, produtos e opções ativas; esgotados aparecem com `soldOut: true`. O dono recebe tudo, com `active`.
+- **Grupos de modificadores:** `required = minChoices ≥ 1` vai no cardápio; a recusa do item sem escolha (CA-03.06) é do envio do pedido (spec 04). Grupo pode ser apagado (as opções vão junto, `ON DELETE CASCADE`), porque o item guarda cópia do nome e do acréscimo (RN-04.18); opções só são desativadas. Acréscimo ≥ 0.
+- **Versões:** `units.version` (configuração: unidade, estações, fluxo), `units.menu_version` (qualquer mudança no cardápio, menos esgotado) e `products.version` (toda mudança do produto, inclusive esgotado). `PATCH /units/{id}`, `PATCH /products/{id}` e `PUT /units/{id}/workflow` aceitam `version` opcional para `VERSION_CONFLICT`.
+- **QR:** gerado no servidor com [`uqr`](https://github.com/unjs/uqr) (sem dependências), em SVG, correção M e margem de 4 módulos (`src/staff/access-qr.ts`).
+- **Auditoria:** `unit.created|updated|template_applied`, `station.created|updated`, `workflow.updated`, `category.created|updated|reordered`, `product.created|updated|reordered|sold_out_changed`, `modifier_group.created|updated|deleted`, `modifier.created|updated`, `staff_member.created|updated|permissions_updated|password_set`, além de `auth.password_link_issued` e `auth.sessions_revoked`. Hash de senha aparece só como `[redacted]`.
+
+### Eventos (sala `unit:{unitId}`, depois do commit)
+
+| Evento                           | Schema                       | Quando                               | `data` / `version`                          |
+| -------------------------------- | ---------------------------- | ------------------------------------ | ------------------------------------------- |
+| `product.sold_out_changed`       | `EventProductSoldOutChanged` | Esgotado marcado ou desmarcado       | `{ productId, soldOut }`; versão do produto |
+| `menu.updated`                   | `EventMenuUpdated`           | Qualquer outra mudança no cardápio   | `{ unitId, version }`; versão do cardápio   |
+| `unit.config_updated` (proposta) | `EventUnitConfigUpdated`     | Unidade, estações ou fluxo alterados | `{ unitId, version }`; versão da unidade    |
+
+`unit.config_updated` não está na spec 03: proposto para o app recarregar `/auth/me` (tempo de atraso, estações) e a tela de configuração.
 
 ## Imagem
 

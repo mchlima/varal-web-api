@@ -187,3 +187,24 @@ export async function credentialsOf(
     email: owner.email,
   };
 }
+
+/**
+ * Gives the staff member of a tenant access to its unit (RN-03.16: without a unit there is no
+ * login), optionally with stations.
+ */
+export async function grantUnit(
+  platform: PrismaClient,
+  tenant: Tenant,
+  stationIds: string[] = [],
+): Promise<void> {
+  await platform.staffUnitPermission.upsert({
+    where: { staffMemberId_unitId: { staffMemberId: tenant.staffMemberId, unitId: tenant.unitId } },
+    create: {
+      organizationId: tenant.organizationId,
+      staffMemberId: tenant.staffMemberId,
+      unitId: tenant.unitId,
+      stationIds,
+    },
+    update: { stationIds },
+  });
+}

@@ -167,6 +167,7 @@ export function defineRealtimeEvent<TType extends string, TData extends z.ZodTyp
 export const SESSION_EVENTS = {
   revoked: 'session.revoked',
   expired: 'session.expired',
+  accessChanged: 'session.access_changed',
 } as const;
 
 export const SessionRevocationReasonSchema = z.enum(SESSION_REVOCATION_REASONS).meta({
@@ -208,6 +209,37 @@ export const EventSessionExpiredSchema = defineEvent(
 
 export type EventSessionExpired = z.infer<typeof EventSessionExpiredSchema>;
 
+/** Why the server asks a socket to reconnect with fresh rooms (spec 03; spec 01, section 10). */
+export const ACCESS_CHANGE_REASONS = [
+  'permissions_changed',
+  'unit_changed',
+  'stations_changed',
+] as const;
+
+export type AccessChangeReason = (typeof ACCESS_CHANGE_REASONS)[number];
+
+export const AccessChangeReasonSchema = z.enum(ACCESS_CHANGE_REASONS).meta({
+  id: 'AccessChangeReason',
+  description:
+    '`permissions_changed`: o dono mudou as permissões do colaborador; `unit_changed`: unidade criada, ativada ou desativada; `stations_changed`: estação criada, ativada, desativada ou com tipo trocado.',
+});
+
+export const EventSessionAccessChangedSchema = defineEvent(
+  'EventSessionAccessChanged',
+  z
+    .object({
+      type: z.literal(SESSION_EVENTS.accessChanged),
+      occurredAt: z.iso.datetime(),
+      data: z.object({ reason: AccessChangeReasonSchema }),
+    })
+    .meta({
+      description:
+        'As unidades ou estações que o usuário acessa mudaram. A sessão continua válida: o servidor desconecta o socket logo depois, e o app busca `GET /auth/me` e reconecta (`socket.connect()`), entrando nas salas do novo acesso (spec 01, seção 10; spec 03).',
+    }),
+);
+
+export type EventSessionAccessChanged = z.infer<typeof EventSessionAccessChangedSchema>;
+
 /** Contract schemas of the real-time channel, listed in `contractSchemas`. */
 export const realtimeContractSchemas: readonly z.ZodType[] = [
   RealtimeErrorCodeSchema,
@@ -216,4 +248,6 @@ export const realtimeContractSchemas: readonly z.ZodType[] = [
   SessionRevocationReasonSchema,
   EventSessionRevokedSchema,
   EventSessionExpiredSchema,
+  AccessChangeReasonSchema,
+  EventSessionAccessChangedSchema,
 ];

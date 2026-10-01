@@ -80,6 +80,23 @@ enum EmailStatus {
   @@map("email_status")
 }
 
+/// Kind of station (spec 03, section 4.1).
+enum StationKind {
+  counter
+  queue
+
+  @@map("station_kind")
+}
+
+/// Where an item in a workflow stage shows up (spec 03, section 4.2).
+enum WorkflowStageTarget {
+  product_station
+  fixed_station
+  none
+
+  @@map("workflow_stage_target")
+}
+
 /// Internal state of an idempotency key (spec 01, section 5). Not part of the public contract.
 enum IdempotencyStatus {
   in_progress
@@ -108,22 +125,37 @@ model Organization {
   users                User[]
   staffMembers         StaffMember[]
   staffUnitPermissions StaffUnitPermission[]
+  stations             Station[]
+  workflowStages       WorkflowStage[]
+  categories           Category[]
+  products             Product[]
+  modifierGroups       ModifierGroup[]
+  modifiers            Modifier[]
 
   @@map("organizations")
 }
 
+/// SQL-only: CHECK late_after_minutes BETWEEN 1 AND 240 (spec 03, section 3).
 model Unit {
   id               String   @id @default(uuid(7)) @db.Uuid
   organizationId   String   @map("organization_id") @db.Uuid
   name             String
   active           Boolean  @default(true)
-  /// Minutes after which an item is shown as late (spec 04).
+  /// Minutes after which an item is shown as late (spec 03, section 3; spec 04).
   lateAfterMinutes Int      @default(15) @map("late_after_minutes")
+  /// Version of the unit settings, stations and workflow (`unit.config_updated`, concurrency).
+  version          Int      @default(0)
+  /// Version of the menu of the unit (`menu.updated`, spec 03, section 8).
+  menuVersion      Int      @default(0) @map("menu_version")
   createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization         Organization          @relation(fields: [organizationId], references: [id])
   staffUnitPermissions StaffUnitPermission[]
+  stations             Station[]
+  workflowStages       WorkflowStage[]
+  categories           Category[]
+  products             Product[]
 
   @@unique([organizationId, name])
   /// Target of composite foreign keys that keep child rows in the same organization.
@@ -171,8 +203,9 @@ model StaffMember {
   @@map("staff_members")
 }
 
-/// Stations a staff member may open in a unit (RN-03.16). `station_ids` has no foreign key:
-/// stations arrive with spec 03.
+/// Stations a staff member may open in a unit (RN-03.16). `station_ids` has no foreign key (an
+/// array cannot have one): the staff service accepts only stations of the same unit, and readers
+/// (`/auth/me`, real-time rooms) keep only the active stations of that unit (spec 03, README).
 model StaffUnitPermission {
   id             String   @id @default(uuid(7)) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
@@ -191,6 +224,158 @@ model StaffUnitPermission {
   @@unique([staffMemberId, unitId])
   @@index([organizationId, unitId])
   @@map("staff_unit_permissions")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Unit setup (spec 03)
+// ---------------------------------------------------------------------------------------------
+
+/// A screen opened on a device (spec 03, section 4.1). Never deleted, only deactivated.
+/// SQL-only: UNIQUE (unit_id, lower(name)).
+model Station {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  unitId         String      @map("unit_id") @db.Uuid
+  name           String
+  kind           StationKind
+  sortOrder      Int         @map("sort_order")
+  active         Boolean     @default(true)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  unit         Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  stages       WorkflowStage[]
+  categories   Category[]
+  products     Product[]
+
+  /// Target of composite foreign keys: a station referenced by a stage, category or product is
+  /// always of the same organization and unit.
+  @@unique([organizationId, unitId, id])
+  @@index([organizationId, unitId])
+  @@map("stations")
+}
+
+/// One stage of the workflow of a unit (spec 03, section 4.2). The workflow is saved at once
+/// (`PUT /units/{id}/workflow`); a stage removed from it is archived (`archived_at`), never
+/// deleted, so items of past shifts keep pointing to it (spec 04).
+/// SQL-only: UNIQUE (unit_id, sort_order) WHERE archived_at IS NULL;
+/// CHECK (target = 'fixed_station') = (station_id IS NOT NULL); CHECK is_final = (target = 'none').
+model WorkflowStage {
+  id             String              @id @default(uuid(7)) @db.Uuid
+  organizationId String              @map("organization_id") @db.Uuid
+  unitId         String              @map("unit_id") @db.Uuid
+  name           String
+  sortOrder      Int                 @map("sort_order")
+  target         WorkflowStageTarget
+  /// Only for `fixed_station`.
+  stationId      String?             @map("station_id") @db.Uuid
+  isFinal        Boolean             @default(false) @map("is_final")
+  archivedAt     DateTime?           @map("archived_at") @db.Timestamptz(3)
+  createdAt      DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  station      Station?     @relation(fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id], onDelete: Restrict)
+
+  @@index([organizationId, unitId])
+  @@map("workflow_stages")
+}
+
+/// SQL-only: UNIQUE (unit_id, lower(name)).
+model Category {
+  id               String   @id @default(uuid(7)) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  unitId           String   @map("unit_id") @db.Uuid
+  name             String
+  sortOrder        Int      @map("sort_order")
+  /// Preparation station of its products (RN-03.08); a `queue` station of the same unit.
+  defaultStationId String   @map("default_station_id") @db.Uuid
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization   Organization @relation(fields: [organizationId], references: [id])
+  unit           Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  defaultStation Station      @relation(fields: [organizationId, unitId, defaultStationId], references: [organizationId, unitId, id])
+  products       Product[]
+
+  @@unique([organizationId, unitId, id])
+  @@index([organizationId, unitId])
+  @@map("categories")
+}
+
+/// SQL-only: CHECK price_cents >= 0 (RN-03.09); CHECK char_length(description) <= 120.
+model Product {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  unitId         String   @map("unit_id") @db.Uuid
+  categoryId     String   @map("category_id") @db.Uuid
+  name           String
+  description    String?
+  priceCents     Int      @map("price_cents")
+  /// Overrides the station of the category (RN-03.08).
+  stationId      String?  @map("station_id") @db.Uuid
+  sortOrder      Int      @map("sort_order")
+  active         Boolean  @default(true)
+  soldOut        Boolean  @default(false) @map("sold_out")
+  /// Incremented on every change, sold-out included (`product.sold_out_changed`).
+  version        Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization   Organization    @relation(fields: [organizationId], references: [id])
+  unit           Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  category       Category        @relation(fields: [organizationId, unitId, categoryId], references: [organizationId, unitId, id])
+  station        Station?        @relation(fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id], onDelete: Restrict)
+  modifierGroups ModifierGroup[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, unitId])
+  @@index([organizationId, categoryId])
+  @@map("products")
+}
+
+/// SQL-only: CHECK min_choices >= 0 AND max_choices >= 1 AND min_choices <= max_choices (RN-03.13).
+/// Deleting a group deletes its modifiers (ON DELETE CASCADE): items keep a copy (RN-04.18).
+model ModifierGroup {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  name           String
+  minChoices     Int      @map("min_choices")
+  maxChoices     Int      @map("max_choices")
+  sortOrder      Int      @map("sort_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  product      Product      @relation(fields: [organizationId, productId], references: [organizationId, id])
+  modifiers    Modifier[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, productId])
+  @@map("modifier_groups")
+}
+
+/// SQL-only: CHECK price_delta_cents >= 0.
+model Modifier {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  modifierGroupId String   @map("modifier_group_id") @db.Uuid
+  name            String
+  priceDeltaCents Int      @default(0) @map("price_delta_cents")
+  sortOrder       Int      @map("sort_order")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  modifierGroup ModifierGroup @relation(fields: [organizationId, modifierGroupId], references: [organizationId, id], onDelete: Cascade)
+
+  @@index([organizationId, modifierGroupId])
+  @@map("modifiers")
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -219,11 +404,11 @@ model PlatformAdmin {
 
 /// One row per device login (spec 01, section 7.2). `organization_id` is null for platform admins.
 model Session {
-  id               String      @id @default(uuid(7)) @db.Uuid
-  subjectType      SubjectType @map("subject_type")
-  subjectId        String      @map("subject_id") @db.Uuid
-  organizationId   String?     @map("organization_id") @db.Uuid
-  deviceId         String      @map("device_id") @db.Uuid
+  id                       String      @id @default(uuid(7)) @db.Uuid
+  subjectType              SubjectType @map("subject_type")
+  subjectId                String      @map("subject_id") @db.Uuid
+  organizationId           String?     @map("organization_id") @db.Uuid
+  deviceId                 String      @map("device_id") @db.Uuid
   /// SHA-256 of the secret part of the current refresh token (the token itself is never stored).
   refreshTokenHash         String      @unique @map("refresh_token_hash")
   /// Hash of the token replaced by the last rotation: presenting it again is a reuse (theft) and

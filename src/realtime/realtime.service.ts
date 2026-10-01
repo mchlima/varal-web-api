@@ -6,6 +6,9 @@ import { AuthEvents, type SessionRevocationReason } from '../auth/auth-events.js
 import { requireOrganizationId } from '../context/request-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
+  type AccessChangeReason,
+  type EventSessionAccessChanged,
+  EventSessionAccessChangedSchema,
   type EventSessionExpired,
   type EventSessionRevoked,
   EventSessionExpiredSchema,
@@ -14,7 +17,7 @@ import {
   type RealtimeEventDefinition,
   SESSION_EVENTS,
 } from './realtime.contracts.js';
-import { isPublicRoom, sessionRoom, stationRoom, unitRoom } from './rooms.js';
+import { isPublicRoom, sessionRoom, stationRoom, subjectRoom, unitRoom } from './rooms.js';
 
 /** What the emitting module provides; the envelope adds the organization, type and time. */
 export interface RealtimeEmit<TData> {
@@ -110,6 +113,42 @@ export class RealtimeService implements OnModuleInit, OnModuleDestroy {
     // Same connection, in order: the event is written before the disconnect packet.
     server.to(rooms).emit(SESSION_EVENTS.revoked, payload);
     server.in(rooms).disconnectSockets(true);
+  }
+
+  /**
+   * Makes sockets reconnect with the rooms of their new access (spec 01, section 10: "mudança de
+   * permissão encerra as sessões ou as conexões de tempo real, para valer na hora"). After the
+   * commit of the ambient transaction, every socket of the given subjects or in the given unit
+   * rooms gets `session.access_changed` and is disconnected; the session stays valid, and the app
+   * reloads `/auth/me` and reconnects. Used by spec 03 on permission, unit and station changes.
+   */
+  refreshAccess(
+    target: {
+      subjects?: readonly { type: 'owner' | 'staff'; id: string }[];
+      unitIds?: readonly string[];
+    },
+    reason: AccessChangeReason,
+  ): void {
+    const rooms = [
+      ...(target.subjects ?? []).map((subject) => subjectRoom(subject.type, subject.id)),
+      ...(target.unitIds ?? []).map(unitRoom),
+    ];
+    if (rooms.length === 0) {
+      return;
+    }
+    const payload: EventSessionAccessChanged = EventSessionAccessChangedSchema.parse({
+      type: SESSION_EVENTS.accessChanged,
+      occurredAt: new Date().toISOString(),
+      data: { reason },
+    });
+    this.prisma.afterCommit(() => {
+      const server = this.server;
+      if (!server) {
+        return;
+      }
+      server.to(rooms).emit(SESSION_EVENTS.accessChanged, payload);
+      server.in(rooms).disconnectSockets(true);
+    });
   }
 
   /** `unit:` and `station:` rooms of each connected socket of a session (diagnostics and tests). */

@@ -41,7 +41,7 @@ import { createTestApp } from '../support/test-app.js';
 
 const databaseUrl = inject('databaseUrl');
 const API = '/api/v1';
-/** Stations arrive with spec 03; `station_ids` has no foreign key yet. */
+/** Fixed ids of the stations created in `beforeAll` (A1 and B1 active, A2 in an inactive unit). */
 const STATION_A1 = '01922f2c-7a3b-7c00-8000-00000000a001';
 const STATION_A2 = '01922f2c-7a3b-7c00-8000-00000000a002';
 const STATION_B1 = '01922f2c-7a3b-7c00-8000-00000000b001';
@@ -103,6 +103,34 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
     for (const tenant of [tenantA, tenantB]) {
       await setPassword(platform, { owner: tenant.ownerId, staff: tenant.staffMemberId });
     }
+    await platform.station.createMany({
+      data: [
+        {
+          id: STATION_A1,
+          organizationId: tenantA.organizationId,
+          unitId: tenantA.unitId,
+          name: 'Cozinha',
+          kind: 'queue',
+          sortOrder: 1,
+        },
+        {
+          id: STATION_A2,
+          organizationId: tenantA.organizationId,
+          unitId: unitA3Inactive,
+          name: 'Cozinha',
+          kind: 'queue',
+          sortOrder: 1,
+        },
+        {
+          id: STATION_B1,
+          organizationId: tenantB.organizationId,
+          unitId: tenantB.unitId,
+          name: 'Cozinha',
+          kind: 'queue',
+          sortOrder: 1,
+        },
+      ],
+    });
     // Staff of A: unit A1 with station A1; also a permission on the inactive unit (ignored).
     await platform.staffUnitPermission.createMany({
       data: [
@@ -178,10 +206,14 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
   });
 
   describe('rooms', () => {
-    it('owner joins every active unit of the organization, nothing of others', async () => {
+    it('owner joins every active unit and station of the organization, nothing of others', async () => {
       const owner = await ownerOf(tenantA);
       await open(owner);
-      expect(await roomsOf(owner)).toEqual([`unit:${tenantA.unitId}`, `unit:${unitA2}`].sort());
+      // Spec 03: the owner opens any station, so it is in every active station of the active units
+      // (not in A2, whose unit is inactive).
+      expect(await roomsOf(owner)).toEqual(
+        [`station:${STATION_A1}`, `unit:${tenantA.unitId}`, `unit:${unitA2}`].sort(),
+      );
     });
 
     it('staff joins only the active units of its permissions and their stations', async () => {
@@ -279,7 +311,8 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
         data: { n: 1 },
       });
 
-      // Unit A2: only the owner of A. Station A1: only the staff of A.
+      // Unit A2: only the owner of A. Station A1: the staff of A and the owner (who opens any
+      // station, spec 03).
       await asTenant(tenantA, () => {
         realtime.emitToUnit(TestPing, { unitId: unitA2, version: 1, data: { n: 2 } });
         realtime.emitToStation(STATION_A1, TestPing, {
@@ -294,7 +327,7 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
           .filter((event) => event.name === 'test.ping')
           .map((event) => (event.payload as { data: { n: number } }).data.n),
       );
-      expect(numbers).toEqual([[1, 2], [1, 3], []]);
+      expect(numbers).toEqual([[1, 2, 3], [1, 3], []]);
     });
 
     it('validates the payload with the event schema', async () => {

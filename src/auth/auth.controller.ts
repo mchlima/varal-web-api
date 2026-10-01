@@ -2,6 +2,7 @@ import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req, Res } fr
 import {
   ApiAcceptedResponse,
   ApiBadRequestResponse,
+  ApiForbiddenResponse,
   ApiNoContentResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
@@ -84,6 +85,11 @@ export class AuthController {
   @RateLimit(LOGIN_RATE_LIMIT, LOGIN_LOCK_DOC)
   @ApiOperation({ summary: 'Login do colaborador (código do estabelecimento, usuário e senha)' })
   @LoginResponses()
+  @ApiForbiddenResponse({
+    description:
+      '`STAFF_WITHOUT_UNIT`: senha certa, mas o colaborador não tem nenhuma unidade ativa liberada (RN-03.16).',
+    standardSchema: ErrorResponseSchema,
+  })
   @ApiOkResponse({
     description: 'Sessão aberta; cookies definidos.',
     standardSchema: PanelMeSchema,

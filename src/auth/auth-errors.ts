@@ -29,6 +29,11 @@ export const AUTH_ERRORS = {
     message:
       'Já foram gerados 3 links de redefinição na última hora. Aguarde um pouco e tente de novo.',
   },
+  /** RN-03.16: a staff member without any active unit cannot log in (right password). */
+  STAFF_WITHOUT_UNIT: {
+    status: 403,
+    message: 'Você ainda não tem acesso a nenhuma unidade. Fale com o responsável pela barraca.',
+  },
   DEVICE_ID_REQUIRED: {
     status: 400,
     message: 'O identificador do aparelho (X-Device-Id) é obrigatório para entrar.',

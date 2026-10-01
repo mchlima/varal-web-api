@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { SubscriptionStatusSchema } from '../openapi/enum-schemas.js';
+import { StationSummarySchema } from '../units/units.schemas.js';
 import { NewPasswordSchema, PASSWORD_MAX_LENGTH } from './password-hasher.js';
 
 /** Typed password of a login: any non-empty string (the minimum applies only to new passwords). */
@@ -79,9 +80,19 @@ export const PanelUnitSchema = z
     name: z.string(),
     /** Owners open any station of the unit. */
     allStations: z.boolean(),
-    /** Stations released to the staff member in this unit (`staff_unit_permissions.station_ids`). */
+    /**
+     * Stations released to the staff member in this unit (`staff_unit_permissions.station_ids`,
+     * only the active stations of the unit); empty for the owner, who opens any station.
+     */
     stationIds: z.array(z.uuid()),
+    stations: z.array(StationSummarySchema).meta({
+      description:
+        'Estações que o usuário pode abrir nesta unidade, ativas e em ordem: todas para o dono, as liberadas para o colaborador.',
+    }),
     canOperateCash: z.boolean(),
+    lateAfterMinutes: z.int().meta({
+      description: 'Minutos a partir dos quais um item aparece como atrasado (spec 03, seção 3).',
+    }),
   })
   .meta({ id: 'PanelUnit' });
 

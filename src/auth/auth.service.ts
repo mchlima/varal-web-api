@@ -116,6 +116,16 @@ export class AuthService {
       },
       password,
       client,
+      async (subject) => {
+        // RN-03.16: without an active unit the staff member cannot log in. Checked only after the
+        // password, so it never reveals whether a username exists.
+        const units = await this.platform.staffUnitPermission.count({
+          where: { staffMemberId: subject.id, unit: { active: true } },
+        });
+        if (units === 0) {
+          throw authError('STAFF_WITHOUT_UNIT');
+        }
+      },
     );
   }
 
@@ -147,6 +157,7 @@ export class AuthService {
     find: () => Promise<LoginSubject | null>,
     password: string,
     client: ClientInfo,
+    authorize?: (subject: LoginSubject) => Promise<void>,
   ): Promise<IssuedSession> {
     const deviceId = client.deviceId;
     if (deviceId === null) {
@@ -163,6 +174,7 @@ export class AuthService {
       throw authError(invalidCode);
     }
     await this.throttle.reset(key);
+    await authorize?.(usable);
 
     const area: AuthArea = usable.subjectType === 'platform_admin' ? 'admin' : 'panel';
     const subjectRef: Subject = {

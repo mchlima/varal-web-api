@@ -8,6 +8,9 @@ import {
   ValidationErrorDetailsSchema,
 } from '../errors/error-response.schema.js';
 import { realtimeContractSchemas } from '../realtime/realtime.contracts.js';
+import { SetupErrorCodeSchema } from '../units/setup-errors.js';
+import { setupEventSchemas } from '../units/setup-events.js';
+import { unitContractSchemas } from '../units/units.schemas.js';
 import {
   ActorTypeSchema,
   EmailStatusSchema,
@@ -34,4 +37,7 @@ export const contractSchemas: readonly z.ZodType[] = [
   EmailStatusSchema,
   AuthErrorCodeSchema,
   ...realtimeContractSchemas,
+  SetupErrorCodeSchema,
+  ...unitContractSchemas,
+  ...setupEventSchemas,
 ];
