@@ -90,6 +90,17 @@ Localmente, os repositórios ficam lado a lado numa pasta comum (`varal/varal-do
 - **Nada operacional é apagado:** comandas, pedidos, itens, pagamentos e movimentos de caixa são cancelados ou estornados, nunca removidos. Cadastros são desativados.
 - **Segredos** só em variáveis de ambiente. Nunca commitar `.env`, credenciais de SMTP ou chaves.
 
+## Credenciais locais
+
+Credenciais de infraestrutura (VPS, PostgreSQL de produção e outras) ficam **só na máquina de desenvolvimento**, fora de qualquer repositório:
+
+- Pasta: `~/.config/varal/credentials/` (permissão `700`, arquivos `600`).
+- Comece pelo `README.md` da pasta: ele lista cada arquivo `.env`, o que contém e o nome das variáveis.
+- Carregue as variáveis num subshell, sem imprimir os valores: `( set -a; . ~/.config/varal/credentials/postgres.env; set +a; <comando> )`.
+- **Nunca** copie valores dessa pasta para repositórios, commits, PRs, issues, logs, memória do agente ou mensagens, e nunca os imprima (`cat`, `echo`, `env`).
+- Ações no VPS ou no banco de produção só com pedido explícito do usuário.
+- Se faltar uma credencial, peça ao usuário; não invente nem procure em outros lugares.
+
 ## Vários agentes ao mesmo tempo
 
 Cada repositório é trabalhado por vários agentes em paralelo. Para que um não atrapalhe o outro:
