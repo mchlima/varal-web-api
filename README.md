@@ -124,6 +124,8 @@ Filtros de lista estendem o schema (`PaginationQuerySchema.extend({ status: ... 
 
 `pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça" com o template padrão (Balcão, Cozinha, Balcão de entrega; Recebido → Preparando → Pronto → Entregue) e um cardápio de espetos (Espetos com "Ponto da carne" obrigatório, "Acompanhamentos" e "Retirar"; Porções; Bebidas no Balcão de entrega), dono `dono@varal.local`, colaboradores `ana` (Balcão e Balcão de entrega, opera caixa) e `bruno` (Cozinha) e admin `admin@varal.local` com o papel Super admin.
 
+Turno aberto de exemplo (spec 04, criado só se a unidade nunca teve turno): comandas 1 "Dona Marta" (espetos em Preparando, atrasados, e refrigerantes em Pronto), 2 "Seu João" (kafta em Recebido, frango dividido entre Preparando e Pronto, pão de alho entregue) e 3 "Mesa da família" (em fechamento, tudo entregue).
+
 **Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
 
 ```bash
@@ -221,7 +223,7 @@ No app dos clientes (só o dono, com o `OwnerOnly()` da spec 03; colaborador rec
 - **Criar** (`POST /organizations`, RN-02.09): numa transação, organização com `access_code` livre, primeira unidade, dono sem senha, convite do dono (`issueOwnerInvite`, e-mail `owner_invite`) e auditoria (`organization.created`, `unit.created`, `unit.template_applied`, `user.created`). E-mail de dono já existente: `409 OWNER_EMAIL_TAKEN` (RN-02.10). Situação inicial `active` (ou `pilot`, no corpo).
 - **Template padrão da primeira unidade:** na mesma transação, logo depois de criar a unidade, o admin chama `UnitTemplateService.applyDefaultTemplate(tx, { organizationId, unitId })` da spec 03 (`UnitsModule`, importado pelo `AdminModule`) com a transação do cliente sem filtro: a unidade nasce com Balcão, Cozinha e Balcão de entrega e as etapas Recebido → Preparando → Pronto → Entregue (`unit.template_applied` na auditoria). Uma falha desfaz a criação inteira.
 - **Situação** (RN-02.11/RN-02.12): `suspend` (de `pilot`/`active`), `reactivate` (de `suspended`/`canceled` para `active` ou `pilot`) e `subscription-status` (qualquer outra), sempre com motivo, que vai para a auditoria (`metadata.reason`) e, em `suspended`/`canceled`, para `organizations.suspended_reason`, que o `GET /auth/me` do painel devolve para a faixa. Transição inválida: `409 INVALID_STATUS_TRANSITION`. Abrir turno (spec 04) chama `assertCanOpenShift` de [`src/common/subscription.ts`](src/common/subscription.ts): `409 ORGANIZATION_SUSPENDED` / `ORGANIZATION_CANCELED` (CA-02.05).
-- **Detalhe**: situação, dono com a situação do convite (`pending`, `expired`, `accepted`), unidades, colaboradores ativos, últimos turnos (vazio até a spec 04), último acesso (maior `sessions.last_used_at` fora do "entrar como") e comunicados não lidos pelo dono.
+- **Detalhe**: situação, dono com a situação do convite (`pending`, `expired`, `accepted`), unidades, colaboradores ativos, últimos 10 turnos (spec 04), último acesso (maior `sessions.last_used_at` fora do "entrar como") e comunicados não lidos pelo dono.
 - Trocar o e-mail de um dono que ainda não aceitou o convite manda um convite novo para o e-mail novo.
 
 ### Comunicados (seção 5)
@@ -393,7 +395,7 @@ Módulos [`src/units`](src/units) (unidades, estações, fluxo, template, roteam
 - **Fluxo:** `PUT` substitui o fluxo inteiro, na ordem enviada. Etapas enviadas com `id` são atualizadas no lugar; as que ficaram de fora são **arquivadas** (`archived_at`), nunca apagadas, porque itens de turnos passados apontam para elas (spec 04). O índice único `(unit_id, sort_order)` vale só para as não arquivadas. Validação pura em `validateWorkflow` (`src/units/workflow-rules.ts`): 2 a 8 etapas, só a última com `none`, `fixed_station` numa estação `queue` ativa da unidade, nomes sem repetir; os problemas voltam em `INVALID_WORKFLOW` com `details.issues` (CA-03.02). O `PUT` incrementa `units.version` primeiro (trava a linha e responde `VERSION_CONFLICT` se o app mandou `version` antiga).
 - **Roteamento (RN-03.08, CA-03.04):** funções puras em `src/units/routing.ts`, para a spec 04: `resolvePrepStationId(product, category)` (a do produto, senão a da categoria), `isValidPrepStation` (estação `queue` ativa) e `stationForStage(stage, prepStationId)`. Toda categoria nova recebe a Cozinha (ou a primeira estação de fila ativa). As FKs compostas `(organization_id, unit_id, station_id)` garantem no banco que categoria, produto e etapa apontam para estação da mesma unidade.
 - **Estações em uso:** uma estação usada por etapa `fixed_station`, categoria ou produto não pode ser desativada nem virar `counter` (`STATION_IN_USE`); a unidade mantém uma `counter` e uma `queue` ativas (`STATION_KIND_REQUIRED`, RN-03.04).
-- **Turno aberto (RN-03.02, RN-03.07, CA-03.03):** `OpenShiftChecker` responde `false` até existirem turnos. A spec 04 troca o provider no `UnitsModule` por uma consulta em `shifts`; aí estações, fluxo e desativação da unidade passam a responder 409 `SHIFT_OPEN`. Cardápio e esgotado continuam liberados com turno aberto (RN-03.11, RN-03.12).
+- **Turno aberto (RN-03.02, RN-03.07, CA-03.03):** `OpenShiftChecker` consulta `shifts` (spec 04): com turno aberto, estações, fluxo e desativação da unidade respondem 409 `SHIFT_OPEN`. A checagem trava a linha da unidade (`FOR UPDATE`), a mesma trava da abertura de turno, então um turno nunca abre no meio de uma mudança de configuração. Cardápio e esgotado continuam liberados com turno aberto (RN-03.11, RN-03.12).
 - **Permissões e `station_ids`:** mantido o array de `staff_unit_permissions` (contrato da spec 01), sem tabela de junção. Estações nunca são apagadas, então nenhum id fica órfão; a escrita (`PUT /staff/{id}/permissions`) só aceita estações **ativas da mesma unidade** (`INVALID_REFERENCE`), e a leitura (`/auth/me`, salas do tempo real, lista de colaboradores) mantém só as estações ativas daquela unidade (`permittedStations`). Desativar uma estação tira o acesso a ela sem reescrever as permissões; reativar devolve.
 - **RN-03.16:** colaborador sem nenhuma unidade ativa não entra: com a senha certa, o login responde 403 `STAFF_WITHOUT_UNIT` (senha errada continua `INVALID_STAFF_CREDENTIALS`, nada é revelado antes da senha). Tirar todas as unidades de um colaborador encerra as sessões dele (`staff_access_removed`).
 - **Mudança de permissão vale na hora (spec 01, seção 10):** o HTTP já confere as permissões no banco a cada requisição; no tempo real, `refreshAccess` reconecta os aparelhos do colaborador (`session.access_changed`). Desativar (RN-03.17), definir a senha (RN-03.19) ou tirar todas as unidades revogam as sessões (`session.revoked`).
@@ -413,6 +415,76 @@ Módulos [`src/units`](src/units) (unidades, estações, fluxo, template, roteam
 | `unit.config_updated`      | `EventUnitConfigUpdated`     | Unidade, estações ou fluxo alterados | `{ unitId, version }`; versão da unidade    |
 
 `unit.config_updated` (spec 03, seção 8) avisa o app para recarregar `/auth/me` (tempo de atraso, estações) e a tela de configuração.
+
+## Operação: turno, comandas e estações (spec 04)
+
+Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (dono ou colaborador); as permissões são por unidade e estação (spec 03), e o "entrar como" age como o dono (RN-02.18), com o admin na auditoria (RN-02.20). Id de outra organização é 404 (CA-01.02); unidade ou estação sem acesso é 403. Erros do módulo no enum `OperationErrorCode`.
+
+| Rota                                                 | O quê                                                                                               | Quem                                                        |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `POST /units/{id}/shifts`                            | Abre turno: `type` (`direct_sale`, `contracted`), `agreement` (obrigatório no contratado), `prices` | dono ou `canOperateCash` (RN-04.02)                         |
+| `GET /units/{id}/shifts/current`                     | `{ shift }` aberto (ou `null`), com acordo e preços                                                 | membros da unidade                                          |
+| `PUT /shifts/{id}/prices`                            | Substitui a tabela de preços do turno aberto (`version` opcional)                                   | dono ou `canOperateCash`                                    |
+| `POST /shifts/{id}/close`                            | Fecha o turno (RN-04.07, RN-04.08)                                                                  | dono ou `canOperateCash`                                    |
+| `GET /shifts/{id}/tabs?status=open,closing`          | Varal: comandas com totais e resumo, por número                                                     | membros da unidade                                          |
+| `POST /shifts/{id}/tabs`                             | Abre comanda aberta (`customerName`)                                                                | balcão                                                      |
+| `GET /tabs/{id}`                                     | Comanda com pedidos, itens e totais                                                                 | membros da unidade                                          |
+| `POST /tabs/{id}/orders`                             | Envia pedido (1 a 50 itens)                                                                         | balcão                                                      |
+| `POST /tabs/{id}/request-bill`, `/reopen`, `/cancel` | `open` → `closing` → `open`; cancelar (`version` opcional, `TAB_CHANGED`)                           | balcão                                                      |
+| `GET /stations/{id}/queue`                           | Fila da estação, pedido mais antigo primeiro, com o fluxo da unidade                                | quem tem a estação                                          |
+| `POST /order-items/{id}/advance`                     | Próxima etapa; `quantity` avança só parte (RN-04.24)                                                | estação do item; balcão só para a etapa final (RN-04.21)    |
+| `POST /order-items/{id}/back`                        | Etapa anterior (RN-04.22)                                                                           | estação do item ou da etapa de volta; balcão antes da final |
+| `POST /order-items/{id}/cancel`                      | Cancela tudo ou `quantity`, com `reason` (RN-04.25 a 04.28)                                         | balcão ou estação do item                                   |
+
+"Balcão" = dono ou colaborador com uma estação `counter` ativa na unidade. Toda escrita aceita `Idempotency-Key` (fila offline do app, CA-01.06/01.07): o pedido, o avanço e a abertura de comanda reenviados devolvem a mesma resposta sem repetir a ação.
+
+### Decisões
+
+- **Um turno aberto por unidade (RN-04.01, CA-04.01):** índice único parcial `shifts (unit_id) WHERE status = 'open'`, mais a trava da linha da unidade na abertura. Organização `suspended`/`canceled` não abre (`assertCanOpenShift`, CA-02.05), mas fecha os turnos abertos (RN-01.01). Unidade inativa: `UNIT_INACTIVE`.
+- **Numeração (RN-04.09, CA-04.02):** `shifts.next_tab_number` é incrementado com `UPDATE … WHERE status = 'open' RETURNING`: a linha do turno fica travada até o commit, dois balcões nunca recebem o mesmo número e um turno fechado no meio do caminho recusa (`SHIFT_CLOSED`). Único `(shift_id, number)` no banco. O número do pedido na comanda (`number_in_tab`) é calculado com a comanda travada.
+- **Cópia do vendido (RN-04.18):** o item grava nome, preço unitário (o do turno, se o produto está em `shift_prices`, senão o do cardápio; CA-04.07), estação de preparo resolvida (`resolvePrepStationId`) e, em `order_item_modifiers`, grupo, opção e acréscimo de cada modificador (sem FK para `modifiers`, que podem ser apagados com o grupo). Nada lê o cardápio depois do envio.
+- **Envio do pedido (RN-04.16, RN-04.17, CA-04.06, CA-03.06):** o corpo é validado com zod (1 a 50 itens, quantidade 1 a 99, observação até 140); depois cada item é conferido contra o cardápio e todos os problemas voltam juntos em `409 ORDER_REJECTED`, `details.items[]` com `index`, `productId`, `reason` (`OrderItemRejectionReason`) e `modifierGroupId`. Nada é gravado se um item for recusado. Regras puras em `src/operation/order-rules.ts`.
+- **Etapas e estação (RN-04.19, spec 03 seção 4.2):** o item entra na primeira etapa ativa do fluxo; `order_items.station_id` guarda a estação em que ele aparece agora (`stationForStage`), `null` na etapa final ou cancelado. A fila da estação é `station_id = :id`. Como o fluxo não muda com turno aberto (RN-03.07), a estação guardada nunca fica velha.
+- **Concorrência (CA-04.05):** toda mudança de item trava a linha (`SELECT … FOR UPDATE`, com `organization_id` à mão) e confere a `version` enviada: versão velha → `409 ITEM_CHANGED` com `details.item` (estado atual) e `details.currentVersion`. Dois aparelhos avançando juntos: um avança, o outro recebe o estado novo. Comandas usam `updateWithVersion` (`TAB_CHANGED`, `version` opcional).
+- **Avançar parte (RN-04.24, CA-04.13):** com `quantity` menor que a da linha, uma linha nova com essa quantidade vai para a próxima etapa, com `split_from_id` apontando a original e a mesma cópia do vendido (modificadores copiados); a original fica com o restante, na etapa e com o `stage_entered_at` que tinha (ganha `version` nova). O total da comanda não muda. A resposta (`ItemChange`) traz `changed` (a linha que mudou) e `remaining` (a original, quando houve divisão). Voltar etapa vale por linha.
+- **Cancelamento (RN-04.25 a 04.28, CA-04.08):** motivo obrigatório (até 140); parcial divide a linha (a nova é a cancelada, a original fica ativa com o restante); `wasted` quando a etapa do item é posterior à primeira, inclusive itens já entregues. Recusado em comanda `paid`, `on_credit`, `settled` ou `canceled` (`TAB_CLOSED`).
+- **Atraso (RN-04.23, CA-04.11):** calculado na leitura: `lateAt` = envio do pedido + `late_after_minutes` da unidade, `isLate` no momento da resposta; `null`/`false` na etapa final ou cancelado. O varal soma `lateItemCount`; o app atualiza o chip localmente a partir de `lateAt`.
+- **Pedido `completed`:** quando todas as linhas estão na etapa final ou canceladas (evento `order.completed`).
+- **Comanda (RN-04.12 a 04.14):** `open` → `closing` (pedir a conta, recusa pedidos novos) → `open` (reabrir); cancelar só quando todos os itens já foram cancelados (`TAB_HAS_ACTIVE_ITEMS` com `details.itemIds`). Totais sempre calculados no servidor: subtotal dos itens não cancelados, desconto (colunas da spec 05, ainda sem rota) e total. `itemCount`, `readyItemCount` (unidades na etapa anterior à final: o sinal de "pronto para entregar") e `lateItemCount` no cartão do varal.
+- **Fechar turno (RN-04.07, RN-04.08, CA-04.09):** trava o turno, recusa com `409 SHIFT_HAS_PENDING_ITEMS` e `details` no formato `ShiftPendingItems` (`tabs` em `open`/`closing`, `cashRegisters`). Itens ainda não finais (de comandas pagas, a partir da spec 05) vão à etapa final, com `shift.items_finalized` na auditoria. Turno fechado não aceita mais nada (`SHIFT_CLOSED`).
+- **Auditoria:** `shift.opened|prices_updated|items_finalized|closed`, `tab.opened|bill_requested|reopened|canceled`, `order.created|completed`, `order_item.stage_changed` (avançar), `order_item.stage_reverted` (voltar) e `order_item.canceled` (motivo, quantidade, perda).
+
+### Fronteira com a spec 05 (fase 6)
+
+- **Paga antes** (`POST /shifts/{id}/tabs/pay-first`, CA-04.10) depende de pagamento e fica para a fase 6. O modelo já tem `tabs.mode` (`pay_first`, `open_tab`) e as situações `paid`, `on_credit`, `settled`; hoje só nasce `open_tab`.
+- `closing` → `paid` e pendurar (`on_credit`) entram com as specs 05 e 06.
+- **Caixas no fechamento do turno:** `ShiftsService.pendingItems` devolve `cashRegisters: []`; a spec 05 acrescenta ali a consulta dos caixas abertos do turno.
+- **Cancelar comanda** com pagamento registrado: a checagem de pagamentos entra em `TabsService.cancel` com a spec 05.
+- Desconto: as colunas `discount_type`, `discount_value`, `discount_reason` existem e entram no total (`discountCents`, RN-05.03), mas só a spec 05 as preenche. `customer_id` (fiado) fica para a spec 06.
+
+### Eventos (spec 04, seção 7.1; depois do commit)
+
+| Evento                         | Schema                                 | Salas                                                                | `data` / `version`                                                        |
+| ------------------------------ | -------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `shift.opened`, `shift.closed` | `EventShiftOpened`, `EventShiftClosed` | `unit`                                                               | `Shift`; versão do turno                                                  |
+| `shift.updated` (proposta)     | `EventShiftUpdated`                    | `unit`                                                               | `Shift` com a tabela de preços nova                                       |
+| `tab.created`, `tab.updated`   | `EventTabCreated`, `EventTabUpdated`   | `unit`                                                               | `TabSummary` com totais; versão da comanda                                |
+| `order.created`                | `EventOrderCreated`                    | `unit` (pedido completo) e `station` de cada item (só os itens dela) | `Order`; versão do pedido                                                 |
+| `order_item.stage_changed`     | `EventOrderItemStageChanged`           | `unit`, `station` de origem e de destino                             | `{ item, previousStageId, previousStationId, remaining }`; versão do item |
+| `order_item.canceled`          | `EventOrderItemCanceled`               | `unit` e `station` em que estava                                     | `{ item, previousStationId, remaining }`; versão do item                  |
+| `order.completed`              | `EventOrderCompleted`                  | `unit`                                                               | `{ orderId, tabId }`; versão do pedido                                    |
+
+- Mudança de etapa e cancelamento saem num único envio para a sala da unidade e as das estações: um aparelho em várias delas recebe o evento uma vez. `order.created` tem payloads diferentes por sala; um aparelho na unidade e numa estação recebe os dois (o app junta pelo `id`).
+- Divisão de quantidade: `item` é a linha nova; `remaining`, a original com o restante (o app atualiza as duas). Item que muda de estação sai da fila de origem (`previousStationId`) e entra na de destino (`item.stationId`).
+- **Reconexão (RN-01.05, CA-04.12):** o app busca `GET /stations/{id}/queue` ou `GET /shifts/{id}/tabs` e depois aplica os eventos, ignorando os de versão menor ou igual à que já tem.
+
+### Testar à mão
+
+```bash
+pnpm db:seed   # turno aberto de exemplo na Barraca da Praça, com 3 comandas
+# dono: veja o login com curl na seção Seed; IDs em GET /units, /units/{id}/shifts/current e /units/{id}/menu
+curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' http://localhost:3000/api/v1/units/<unitId>/shifts/current
+```
 
 ## Imagem
 
