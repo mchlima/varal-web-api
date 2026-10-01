@@ -5,6 +5,7 @@
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import request from 'supertest';
 
+import type { Permission, SystemRoleKey } from '../../src/admin/rbac/permissions.js';
 import { AUTH_COOKIES, type AuthArea } from '../../src/auth/auth-area.js';
 import { hashPassword } from '../../src/auth/password-hasher.js';
 import type { PrismaClient } from '../../src/generated/prisma/client.js';
@@ -107,11 +108,19 @@ export async function setPassword(
   }
 }
 
-/** Creates an active platform admin with a password. */
+export interface TestAdminAccess {
+  /** System roles by key (spec 02, section 3.2). Default: Super admin. */
+  roles?: SystemRoleKey[];
+  /** Extra permissions (RN-02.02). */
+  permissions?: Permission[];
+}
+
+/** Creates an active platform admin with a password and, by default, the Super admin role. */
 export async function createPlatformAdmin(
   platform: PrismaClient,
   password = TEST_PASSWORD,
-): Promise<{ id: string; email: string }> {
+  access: TestAdminAccess = {},
+): Promise<{ id: string; email: string; name: string }> {
   const suffix = crypto.randomUUID().slice(0, 8);
   const admin = await platform.platformAdmin.create({
     data: {
@@ -120,7 +129,20 @@ export async function createPlatformAdmin(
       passwordHash: await hashPassword(password),
     },
   });
-  return { id: admin.id, email: admin.email };
+  const roles = await platform.role.findMany({
+    where: { systemKey: { in: access.roles ?? ['super_admin'] } },
+    select: { id: true },
+  });
+  await platform.platformAdminRole.createMany({
+    data: roles.map((role) => ({ platformAdminId: admin.id, roleId: role.id })),
+  });
+  await platform.platformAdminPermission.createMany({
+    data: (access.permissions ?? []).map((permission) => ({
+      platformAdminId: admin.id,
+      permission,
+    })),
+  });
+  return { id: admin.id, email: admin.email, name: admin.name };
 }
 
 export interface LoggedIn {

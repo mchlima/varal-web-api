@@ -12,8 +12,12 @@ import { CliModule } from './cli.module.js';
 export const USAGE = `Cria um admin da plataforma e envia o convite por e-mail (vale 7 dias).
 
 Uso:
-  node dist/cli/create-platform-admin.js --name "Nome" --email pessoa@exemplo.com
-  pnpm admin:create -- --name "Nome" --email pessoa@exemplo.com   (desenvolvimento)
+  node dist/cli/create-platform-admin.js --name "Nome" --email pessoa@exemplo.com [--role "Papel"]
+  pnpm admin:create -- --name "Nome" --email pessoa@exemplo.com [--role "Papel"]   (desenvolvimento)
+
+--role  Nome do papel (ex.: "Super admin", "Suporte"). Sem ele, o admin recebe Super admin se ainda
+        não houver nenhum Super admin ativo (primeiro admin); senão fica sem papel, para receber um
+        na tela de usuários do admin.
 
 O e-mail é enfileirado no banco e enviado pelo worker da API em execução.
 Em produção: docker exec varal-api node dist/cli/create-platform-admin.js --name ... --email ...`;
@@ -36,16 +40,22 @@ const consoleOutput: CliOutput = {
 };
 
 /**
- * `create-platform-admin`: first access to the admin in production, while the users screen of the
- * admin (spec 02, phase 3) does not exist. The admin is created active without a password; the
- * invite (spec 01, section 7.4) lets them set it. The output never has the token or the link.
+ * `create-platform-admin`: first access to the admin in production (and a way back in if every
+ * admin is lost). The admin is created active without a password; the invite (spec 01, section 7.4)
+ * lets them set it. The first admin gets Super admin (RN-02.05); `--role` chooses another role. The
+ * output never has the token or the link.
  */
 export async function createPlatformAdminCommand(
   argv: string[],
   output: CliOutput = consoleOutput,
   options: { logger?: LogLevel[] | false } = {},
 ): Promise<number> {
-  let values: { name?: string | undefined; email?: string | undefined; help?: boolean | undefined };
+  let values: {
+    name?: string | undefined;
+    email?: string | undefined;
+    role?: string | undefined;
+    help?: boolean | undefined;
+  };
   try {
     // `pnpm admin:create -- --name ...` passes the `--` along.
     const args = argv[0] === '--' ? argv.slice(1) : argv;
@@ -54,6 +64,7 @@ export async function createPlatformAdminCommand(
       options: {
         name: { type: 'string' },
         email: { type: 'string' },
+        role: { type: 'string' },
         help: { type: 'boolean', short: 'h' },
       },
       strict: true,
@@ -87,14 +98,30 @@ export async function createPlatformAdminCommand(
     // Outside a request: the audit actor is `system` (spec 01, section 8), with `source: cli`.
     const created = await runWithContext(
       systemContext({ requestId: `cli-${crypto.randomUUID()}` }),
-      () => admins.create(parsed.data, { source: 'cli' }),
+      async () => {
+        const roleIds = await admins.resolveCliRoles(values.role);
+        return admins.create(parsed.data, { roleIds }, { source: 'cli' });
+      },
     );
     output.out(`Admin da plataforma criado: ${created.name} <${created.email}>.`);
+    output.out(
+      created.roleNames.length > 0
+        ? `Papel: ${created.roleNames.join(', ')}.`
+        : 'Sem papel: atribua um papel na tela de usuários do admin.',
+    );
     output.out(`Convite enviado para ${created.email}.`);
     return EXIT.ok;
   } catch (error) {
     if (error instanceof AppError) {
-      output.err(`Não foi possível criar o admin: ${error.toResponse().error.message}`);
+      const { message, details } = error.toResponse().error;
+      const fields = Array.isArray(details.fields)
+        ? (details.fields as { path: string; message: string }[])
+        : [];
+      output.err(
+        fields.length > 0
+          ? `Não foi possível criar o admin: ${fields.map((field) => `--${field.path}: ${field.message}`).join(' ')}`
+          : `Não foi possível criar o admin: ${message}`,
+      );
     } else if (error instanceof z.ZodError) {
       output.err(`Dados inválidos: ${error.issues.map((issue) => issue.message).join(' ')}`);
     } else {

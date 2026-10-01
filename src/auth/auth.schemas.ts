@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { PermissionSchema } from '../admin/rbac/permissions.js';
 import { SubscriptionStatusSchema } from '../openapi/enum-schemas.js';
 import { StationSummarySchema } from '../units/units.schemas.js';
 import { NewPasswordSchema, PASSWORD_MAX_LENGTH } from './password-hasher.js';
@@ -96,6 +97,19 @@ export const PanelUnitSchema = z
   })
   .meta({ id: 'PanelUnit' });
 
+export const PanelImpersonationSchema = z
+  .object({
+    id: z.uuid(),
+    adminName: z.string(),
+    startedAt: z.iso.datetime(),
+    expiresAt: z.iso.datetime(),
+  })
+  .meta({
+    id: 'PanelImpersonation',
+    description:
+      '"Entrar como" (spec 02, seção 7): "Você está acessando como {organização} — {admin}". "Encerrar acesso" é o `POST /auth/logout`.',
+  });
+
 export const PanelMeSchema = z
   .object({
     subject: z.object({
@@ -110,15 +124,35 @@ export const PanelMeSchema = z
       name: z.string(),
       accessCode: z.string(),
       subscriptionStatus: SubscriptionStatusSchema,
+      suspendedReason: z.string().nullable().meta({
+        description:
+          'Motivo da suspensão ou do cancelamento, para a faixa do painel do dono (RN-02.12).',
+      }),
     }),
     units: z.array(PanelUnitSchema),
     session: SessionInfoSchema,
+    impersonation: PanelImpersonationSchema.nullable().meta({
+      description:
+        'Preenchido quando a sessão é um "entrar como" da equipe do Varal: o app mostra a faixa fixa em todas as telas (RN-02.19).',
+    }),
   })
   .meta({ id: 'PanelMe', description: 'Perfil, organização, unidades e estações permitidas.' });
 
 export const AdminMeSchema = z
   .object({
     admin: z.object({ id: z.uuid(), name: z.string(), email: z.string() }),
+    roles: z.array(
+      z.object({
+        id: z.uuid(),
+        name: z.string(),
+        isSystem: z.boolean(),
+        systemKey: z.string().nullable(),
+      }),
+    ),
+    permissions: z.array(PermissionSchema).meta({
+      description:
+        'Permissões efetivas (RN-02.02): o app esconde as ações sem permissão (RN-02.01).',
+    }),
     session: SessionInfoSchema,
   })
   .meta({ id: 'AdminMe' });
@@ -126,3 +160,13 @@ export const AdminMeSchema = z
 export type PanelMe = z.infer<typeof PanelMeSchema>;
 export type AdminMe = z.infer<typeof AdminMeSchema>;
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
+
+export const ImpersonationExchangeRequestSchema = z
+  .object({
+    token: z
+      .string()
+      .min(20)
+      .max(200)
+      .meta({ description: 'Token do link de uso único (fragmento `#token=` de `/entrar-como`).' }),
+  })
+  .meta({ id: 'ImpersonationExchangeRequest' });

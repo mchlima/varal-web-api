@@ -110,6 +110,44 @@ export class SessionService {
     return { session, refreshToken: `${session.id}.${secret}`, replacedSessionIds };
   }
 
+  /**
+   * Opens the panel session of an "entrar como" (spec 02, RN-02.21): the owner as subject, bound to
+   * the impersonation and ending with it (`expires_at` of the impersonation, never extended by a
+   * refresh). Other sessions of the owner are left alone.
+   */
+  async createForImpersonation(
+    tx: AuthDb,
+    input: NewSession & { impersonationId: string; expiresAt: Date },
+    now = new Date(),
+  ): Promise<{ session: Session; refreshToken: string }> {
+    const secret = randomToken();
+    const session = await tx.session.create({
+      data: {
+        subjectType: input.subjectType,
+        subjectId: input.subjectId,
+        organizationId: input.organizationId,
+        deviceId: input.deviceId,
+        refreshTokenHash: hashToken(secret),
+        expiresAt: input.expiresAt,
+        lastUsedAt: now,
+        userAgent: userAgentOf(input.userAgent),
+        ip: input.ip,
+        impersonationId: input.impersonationId,
+      },
+    });
+    return { session, refreshToken: `${session.id}.${secret}` };
+  }
+
+  /** Ends the panel sessions of an "entrar como" (the admin ended it, or it expired). */
+  async revokeForImpersonation(
+    tx: AuthDb,
+    impersonationId: string,
+    organizationId: string,
+    now = new Date(),
+  ): Promise<string[]> {
+    return this.revokeWhere(tx, { impersonationId }, 'impersonation_ended', now, organizationId);
+  }
+
   /** The session if it exists, is not revoked and has not expired. */
   async findActive(sessionId: string, now = new Date()): Promise<Session | null> {
     const session = await this.platform.session.findUnique({ where: { id: sessionId } });
@@ -170,7 +208,11 @@ export class SessionService {
           previousRefreshTokenHash: session.refreshTokenHash,
           refreshedAt: now,
           lastUsedAt: now,
-          expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
+          // An "entrar como" session never outlives the impersonation (CA-02.08).
+          expiresAt:
+            session.impersonationId === null
+              ? new Date(now.getTime() + REFRESH_TOKEN_TTL_MS)
+              : session.expiresAt,
           userAgent: userAgentOf(client.userAgent),
           ip: client.ip,
         },
@@ -244,7 +286,7 @@ export class SessionService {
       subjectType?: SubjectType;
       subjectId?: string;
       deviceId?: string;
-      impersonationId?: null;
+      impersonationId?: string | null;
     },
     reason: SessionRevocationReason,
     now: Date,

@@ -41,7 +41,7 @@ export class AuditError extends Error {
  *
  * - Always called with the transaction of the action (`tx`), so the action and its audit row commit
  *   or roll back together.
- * - Actor, "entrar como" admin (`impersonator_id`, RN-02.20), device, IP and request id come from the
+ * - Actor, "entrar como" admin and session (`impersonator_id`, `impersonation_id`, RN-02.20), device, IP and request id come from the
  *   request context; outside a request the actor is `system`.
  * - Insert-only: there is no method to change or remove entries, and a database trigger rejects
  *   UPDATE and DELETE on `audit_logs`.
@@ -73,6 +73,7 @@ export class AuditService {
         actorType: auth?.actor.type ?? 'system',
         actorId: auth?.actor.id ?? null,
         impersonatorId: auth?.impersonatorId ?? null,
+        impersonationId: auth?.impersonationId ?? null,
         action: entry.action,
         entityType: entry.entityType,
         entityId: entry.entityId ?? null,

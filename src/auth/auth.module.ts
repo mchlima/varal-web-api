@@ -7,6 +7,8 @@ import { AuthController } from './auth.controller.js';
 import { AuthEvents } from './auth-events.js';
 import { AuthGuard } from './auth.guard.js';
 import { AuthService } from './auth.service.js';
+import { ImpersonationAuthController } from './impersonation-auth.controller.js';
+import { ImpersonationService } from './impersonation.service.js';
 import { LoginThrottleService } from './login-throttle.service.js';
 import { PasswordLinkService } from './password-link.service.js';
 import { PasswordTokenService } from './password-token.service.js';
@@ -20,13 +22,14 @@ import { SessionService } from './session.service.js';
  */
 @Global()
 @Module({
-  controllers: [AuthController, AdminAuthController],
+  controllers: [AuthController, AdminAuthController, ImpersonationAuthController],
   providers: [
     AccessTokenService,
     AuthEvents,
     AuthGuard,
     { provide: APP_GUARD, useExisting: AuthGuard },
     AuthService,
+    ImpersonationService,
     LoginThrottleService,
     PasswordLinkService,
     PasswordTokenService,
@@ -35,6 +38,13 @@ import { SessionService } from './session.service.js';
     RateLimitGuard,
     SessionService,
   ],
-  exports: [AuthEvents, AuthService, PasswordLinkService, SessionService, RateLimiter],
+  exports: [
+    AuthEvents,
+    AuthService,
+    ImpersonationService,
+    PasswordLinkService,
+    SessionService,
+    RateLimiter,
+  ],
 })
 export class AuthModule {}

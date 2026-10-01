@@ -112,7 +112,7 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 ### Auditoria
 
-`auditService.record(tx, { action, entityType, entityId, before, after, metadata })` dentro da transação da ação. Ator, admin do "entrar como", aparelho, IP e `requestId` vêm do contexto; `changes` guarda só os campos alterados (`{ before, after }`), sem segredos.
+`auditService.record(tx, { action, entityType, entityId, before, after, metadata })` dentro da transação da ação. Ator, admin e sessão do "entrar como" (`impersonator_id`, `impersonation_id`), aparelho, IP e `requestId` vêm do contexto; `changes` guarda só os campos alterados (`{ before, after }`), sem segredos.
 
 ### Datas
 
@@ -120,7 +120,7 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 ### Seed
 
-`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça" com o template padrão (Balcão, Cozinha, Balcão de entrega; Recebido → Preparando → Pronto → Entregue) e um cardápio de espetos (Espetos com "Ponto da carne" obrigatório, "Acompanhamentos" e "Retirar"; Porções; Bebidas no Balcão de entrega), dono `dono@varal.local`, colaboradores `ana` (Balcão e Balcão de entrega, opera caixa) e `bruno` (Cozinha) e admin `admin@varal.local`.
+`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça" com o template padrão (Balcão, Cozinha, Balcão de entrega; Recebido → Preparando → Pronto → Entregue) e um cardápio de espetos (Espetos com "Ponto da carne" obrigatório, "Acompanhamentos" e "Retirar"; Porções; Bebidas no Balcão de entrega), dono `dono@varal.local`, colaboradores `ana` (Balcão e Balcão de entrega, opera caixa) e `bruno` (Cozinha) e admin `admin@varal.local` com o papel Super admin.
 
 **Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
 
@@ -133,21 +133,21 @@ curl -b jar.txt http://localhost:3000/api/v1/auth/me
 
 ## Primeiro admin
 
-Enquanto a tela de usuários do admin não existe (spec 02, fase 3), o primeiro acesso ao admin em produção é criado por linha de comando:
+O primeiro acesso ao admin em produção é criado por linha de comando (depois, os usuários são convidados pela tela do admin, `POST /admin/users`):
 
 ```bash
 # Produção (VPS): dentro do container da API, que já tem DATABASE_URL, ADMIN_URL e o SMTP no ambiente
 docker exec varal-api node dist/cli/create-platform-admin.js --name "Nome da Pessoa" --email pessoa@exemplo.com
 
 # Desenvolvimento (banco do worktree, e-mail no Mailpit em http://localhost:8025)
-pnpm admin:create -- --name "Nome da Pessoa" --email pessoa@exemplo.com
+pnpm admin:create -- --name "Nome da Pessoa" --email pessoa@exemplo.com [--role "Suporte"]
 ```
 
 - Valida nome e e-mail (guardado em minúsculas) e recusa, com código de saída 1, se já existir admin com o e-mail; argumentos inválidos saem com 2 e `--help` mostra o uso.
 - Numa transação: cria o `platform_admin` ativo e sem senha, gera o convite (7 dias, seção 7.4), enfileira o e-mail `admin_invite` e grava a auditoria `platform_admin.created` com ator `system` (o `actor_type` que jobs e scripts já usam), `metadata.source = "cli"` e `request_id` `cli-<uuid>`.
 - **Quem envia o e-mail é o worker da API em execução** (fila `email.send`): o comando sobe só um contexto enxuto do Nest com o pg-boss em modo produtor (`PG_BOSS_WORKERS = false`: sem workers, sem cron), enfileira e encerra. Em produção, rodando com `docker exec` no `varal-api`, o e-mail sai pelo worker do próprio container; em desenvolvimento, deixe o `pnpm dev` rodando para o convite chegar ao Mailpit.
 - A saída nunca mostra o token nem o link, só `Convite enviado para <email>`. Se o convite vencer antes do primeiro acesso, use "Esqueci a senha" na tela de login do admin.
-- **RBAC (fase 3):** este admin não tem papel, porque os papéis ainda não existem na API. Quando a spec 02 trouxer `roles` e `platform_admin_roles`, a migration ou o seed dos papéis deve dar o papel **Super admin** ao admin criado por este comando (RN-02.05 exige pelo menos um Super admin ativo).
+- **Papel (RBAC, spec 02):** sem `--role`, o admin recebe **Super admin** se ainda não houver nenhum Super admin ativo (o primeiro admin; RN-02.05 exige pelo menos um); senão fica sem papel, para receber um na tela de usuários. `--role "Nome"` escolhe o papel pelo nome (sem diferenciar maiúsculas); papel inexistente sai com 1 sem criar nada. A migration do RBAC deu Super admin aos admins que já existiam sem papel. O comando também serve para recuperar o acesso se todos os Super admin forem perdidos (desativar o último é recusado pela API, mas o banco pode ser mexido à mão).
 
 ## Autenticação (spec 01, seção 7)
 
@@ -172,14 +172,77 @@ Rotas em [`src/auth`](src/auth): `POST /auth/owner/login`, `POST /auth/staff/log
 - Organizações `suspended` ou `canceled` continuam entrando: a RN-01.01 só bloqueia abrir turno.
 - **Auditoria:** `auth.login`, `auth.logout`, `auth.password_changed`, `auth.password_reset`, `auth.invite_accepted`, `auth.password_link_issued` e `auth.sessions_revoked`. Falhas de login **não** vão para `audit_logs` (somente inserção; tentativas com identificadores inventados encheriam a tabela): alimentam o bloqueio e o bloqueio vai para o log da aplicação.
 - **Limite por IP em memória** (`RateLimiter`): logins 20/min, "esqueci a senha" 5 a cada 15 min, consulta de código 30/min, redefinição e troca de senha 10 a cada 15 min (`429 RATE_LIMITED`). Vale por instância e zera no restart; com mais de uma instância precisaria ir para o banco.
-- RBAC do admin (permissões por rota) e "entrar como" (`sessions.impersonation_id`, `impersonatorId` no contexto) chegam com a spec 02.
+- RBAC do admin (permissões por rota) e "entrar como" (`sessions.impersonation_id`, `impersonatorId` no contexto): seção [Admin da plataforma](#admin-da-plataforma-spec-02).
 
 **Convite e redefinição (seção 7.4).** `PasswordTokenService`: 32 bytes aleatórios, só o hash no banco, uso único; gerar um novo invalida os anteriores do mesmo tipo; convite 7 dias, redefinição 1 h; **RN-01.02** no máximo 3 links de redefinição por usuário por hora. `PasswordLinkService` gera o link `{PANEL_URL|ADMIN_URL}/definir-senha#token=...&tipo=convite|redefinicao` (o token vai no fragmento, que o navegador não envia a servidores nem em `Referer`) e enfileira o e-mail:
 
 - `issueOwnerInvite(tx, ownerId)`: chamado pelo admin ao criar a organização (fase 3, RN-02.09), na mesma transação;
 - `requestOwnerPasswordReset(email)` / `requestAdminPasswordReset(email)`: "Esqueci a senha", sempre a mesma resposta e pelo menos 400 ms, exista ou não o e-mail (**RN-01.03**);
 - `issueStaffPasswordReset(staffMemberId, { sendEmail })`: redefinição do colaborador pelo dono (RN-03.18; a rota fica para a spec 03); devolve o link para copiar ou mandar por WhatsApp;
-- `issueAdminInvite(tx, adminId)`: convite de admin (spec 02).
+- `issueAdminInvite(tx, adminId)` / `issueAdminPasswordReset(tx, adminId)`: convite e redefinição de admin pela tela de usuários (spec 02).
+
+## Admin da plataforma (spec 02)
+
+Rotas em [`src/admin`](src/admin), todas sob `/api/v1/admin` e com a sessão do admin (CA-01.04). O lado do dono fica em [`src/announcements`](src/announcements) e [`src/support-access`](src/support-access); a troca do link do "entrar como" em [`src/auth`](src/auth).
+
+| Rotas                                                                                                                                                                   | Permissão                                    |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `GET /permissions` (catálogo)                                                                                                                                           | qualquer admin                               |
+| `GET /roles`                                                                                                                                                            | `admin.roles:manage` ou `admin.users:manage` |
+| `POST /roles`, `PATCH /roles/{id}`, `DELETE /roles/{id}`                                                                                                                | `admin.roles:manage`                         |
+| `GET /users`, `GET /users/{id}`, `POST /users` (convite), `PATCH /users/{id}`, `PUT /users/{id}/roles`, `PUT /users/{id}/permissions`, `POST /users/{id}/password-link` | `admin.users:manage`                         |
+| `GET /organizations` (busca, situação, paginação), `GET /organizations/{id}`                                                                                            | `organizations:read`                         |
+| `POST /organizations`                                                                                                                                                   | `organizations:create`                       |
+| `PATCH /organizations/{id}` (nome, nome e e-mail do dono), `POST /organizations/{id}/owner-invite`                                                                      | `organizations:update`                       |
+| `POST /organizations/{id}/suspend`, `/reactivate`                                                                                                                       | `organizations:suspend`                      |
+| `PUT /organizations/{id}/subscription-status`                                                                                                                           | `subscriptions:update`                       |
+| `GET /announcements`, `GET /announcements/{id}`                                                                                                                         | `announcements:read`                         |
+| `POST /announcements`, `PATCH /announcements/{id}`, `POST /announcements/{id}/publish`, `/archive`                                                                      | `announcements:manage`                       |
+| `GET /metrics/overview`, `GET /metrics/organizations`                                                                                                                   | `metrics:read`                               |
+| `POST /impersonations`, `GET /impersonations`                                                                                                                           | `impersonation:use`                          |
+| `POST /impersonations/{id}/end`                                                                                                                                         | o próprio admin da sessão                    |
+| `GET /emails`, `GET /emails/usage`                                                                                                                                      | `emails:read`                                |
+| `GET /audit-logs`                                                                                                                                                       | `audit:read`                                 |
+
+No app dos clientes (só o dono, com o `OwnerOnly()` da spec 03; colaborador recebe 403): `GET /api/v1/announcements/unread`, `POST /api/v1/announcements/{id}/read` e `GET /api/v1/support-access`. E a troca do link do "entrar como": `POST /api/v1/auth/impersonation`.
+
+### RBAC (seção 3)
+
+- **Catálogo** fixo em [`src/admin/rbac/permissions.ts`](src/admin/rbac/permissions.ts), publicado no OpenAPI como o enum `Permission` (RN-02.03). Cada rota declara `@RequirePermission('x', 'y')` (qualquer uma delas) ou `@AnyAdmin()`; o `PermissionGuard` lê do banco, a cada requisição, as permissões efetivas (papéis + avulsas, RN-02.02/RN-02.08) e responde `403 FORBIDDEN` com `details.requiredPermissions`. O OpenAPI leva a lista em `x-permissions` de cada operação. Um teste (`test/e2e/admin-permissions.e2e-spec.ts`) falha se alguma rota sob `/admin` (fora `/admin/auth`) não declarar permissão; outro (`test/integration/admin-rbac.int-spec.ts`) percorre todas as rotas com cada papel do sistema e confere o 403.
+- **Papéis do sistema** criados pela migration (idempotente; o seed recria os que faltarem), identificados por `roles.system_key`: `super_admin`, `support`, `finance`, `read_only` (tabela da seção 3.2). **Super admin** não tem linhas em `role_permissions`: tem sempre o catálogo inteiro, inclusive permissões criadas depois, e não pode ser editado. Os outros papéis do sistema mantêm o nome, mas podem ter descrição e permissões alteradas; nenhum papel do sistema é excluído (RN-02.04). Papéis personalizados: criar, renomear, alterar e excluir quando ninguém os tem (RN-02.07).
+- **RN-02.05:** desativar o último Super admin ativo ou tirar o papel dele dá `409 LAST_SUPER_ADMIN`; essas mudanças travam a linha do papel Super admin (`FOR UPDATE`) para duas não passarem juntas. **RN-02.06:** ninguém muda os próprios papéis, permissões avulsas ou situação (`403 CANNOT_CHANGE_OWN_ACCESS`).
+- Desativar um usuário do admin encerra as sessões dele na hora. `GET /admin/auth/me` devolve os papéis e as permissões efetivas, para o app esconder o que não pode.
+- As rotas de `/admin/auth` (login, sessão, senha) não pedem permissão: são a própria sessão.
+
+### Organizações (seção 4)
+
+- **Criar** (`POST /organizations`, RN-02.09): numa transação, organização com `access_code` livre, primeira unidade, dono sem senha, convite do dono (`issueOwnerInvite`, e-mail `owner_invite`) e auditoria (`organization.created`, `unit.created`, `unit.template_applied`, `user.created`). E-mail de dono já existente: `409 OWNER_EMAIL_TAKEN` (RN-02.10). Situação inicial `active` (ou `pilot`, no corpo).
+- **Template padrão da primeira unidade:** na mesma transação, logo depois de criar a unidade, o admin chama `UnitTemplateService.applyDefaultTemplate(tx, { organizationId, unitId })` da spec 03 (`UnitsModule`, importado pelo `AdminModule`) com a transação do cliente sem filtro: a unidade nasce com Balcão, Cozinha e Balcão de entrega e as etapas Recebido → Preparando → Pronto → Entregue (`unit.template_applied` na auditoria). Uma falha desfaz a criação inteira.
+- **Situação** (RN-02.11/RN-02.12): `suspend` (de `pilot`/`active`), `reactivate` (de `suspended`/`canceled` para `active` ou `pilot`) e `subscription-status` (qualquer outra), sempre com motivo, que vai para a auditoria (`metadata.reason`) e, em `suspended`/`canceled`, para `organizations.suspended_reason`, que o `GET /auth/me` do painel devolve para a faixa. Transição inválida: `409 INVALID_STATUS_TRANSITION`. Abrir turno (spec 04) chama `assertCanOpenShift` de [`src/common/subscription.ts`](src/common/subscription.ts): `409 ORGANIZATION_SUSPENDED` / `ORGANIZATION_CANCELED` (CA-02.05).
+- **Detalhe**: situação, dono com a situação do convite (`pending`, `expired`, `accepted`), unidades, colaboradores ativos, últimos turnos (vazio até a spec 04), último acesso (maior `sessions.last_used_at` fora do "entrar como") e comunicados não lidos pelo dono.
+- Trocar o e-mail de um dono que ainda não aceitou o convite manda um convite novo para o e-mail novo.
+
+### Comunicados (seção 5)
+
+Criados como rascunho; `POST /publish` publica agora ou, com `publishAt` no futuro, agenda; publicado só pode ser arquivado (RN-02.15). Para o dono, um agendado aparece **a partir de `publish_at`**, mesmo antes do job `admin.minutely` marcar `published` (CA-02.06). Públicos: todos, por situação (avaliada no momento da leitura) ou organizações escolhidas (`announcement_targets`). A leitura (`announcement_reads`, uma por dono) é dado de tenant; comunicado de outro público responde 404. Num "entrar como" a leitura não é registrada.
+
+### Métricas (seção 6)
+
+Período em dias de Brasília (padrão: últimos 30). Organizações por situação e último acesso já vêm dos dados atuais; turnos, comandas, valor vendido e ticket médio ficam em zero até as specs 04 a 06: o único lugar a preencher é `MetricsService.operationalTotals`.
+
+### "Entrar como" (seção 7)
+
+Decisão do dono do projeto para o MVP: acesso total (RN-02.18), com `impersonation:use`, sempre auditado e listado ao dono. Como a API tem host próprio e os cookies do app e do admin ficam no mesmo host (distinguidos pelo nome, spec 01, seção 4), o fluxo é:
+
+1. O admin chama `POST /admin/impersonations` com a organização e o motivo (mínimo 10 caracteres). A API grava `impersonation_sessions` (60 min, RN-02.17), audita `impersonation.started` e devolve `handoffUrl` = `{PANEL_URL}/entrar-como#token=...`: um token de uso único, válido por 2 minutos, guardado só como hash, no fragmento (não vai para logs nem `Referer`).
+2. O app do admin abre esse link numa nova aba. A página `/entrar-como` do painel chama `POST /api/v1/auth/impersonation` com o token e o próprio `X-Device-Id`. O navegador manda junto o cookie de acesso do admin (mesmo host da API): **a API exige a sessão do mesmo admin que abriu o acesso**, então um link vazado não funciona em outro navegador (`401` sem sessão do admin, `400 INVALID_IMPERSONATION_TOKEN` para link usado, vencido ou de outro admin).
+3. A API abre uma sessão do app **como o dono** (`sessions.impersonation_id`), com os cookies do app, que termina junto com o "entrar como": a renovação nunca passa de `expires_at` e o token de acesso também não (CA-02.08). Cada requisição dessa sessão leva `impersonatorId` e `impersonationId` no contexto: a auditoria grava o dono como ator, o admin em `impersonator_id` e a sessão em `impersonation_id` (RN-02.20). O `GET /auth/me` traz `impersonation` (`adminName`, `expiresAt`) para a faixa fixa (RN-02.19).
+4. Termina por `POST /admin/impersonations/{id}/end` (só o admin que abriu), pelo "Encerrar acesso" do painel (`POST /auth/logout` da sessão do "entrar como") ou por tempo; as sessões caem na hora e o socket recebe `session.revoked` (`impersonation_ended`). A sessão nunca vale no admin nem em outra organização (RN-02.21), e trocar a senha do dono é recusado (`403 NOT_ALLOWED_DURING_IMPERSONATION`).
+5. O dono vê os acessos em `GET /api/v1/support-access` (admin, motivo, início e fim; RN-02.22).
+
+### E-mails e auditoria (seção 8)
+
+`GET /admin/emails` (tipo, situação, organização, período; com o erro) e `GET /admin/audit-logs` (organização, ator, admin do "entrar como", ação exata ou prefixo terminado em ponto, entidade, período; com as alterações), paginadas da mais nova para a mais antiga. Toda ação do admin é auditada (`role.*`, `platform_admin.*`, `organization.*`, `user.*`, `announcement.*`, `impersonation.*`).
 
 ## Tempo real (spec 01, seção 10)
 
@@ -282,7 +345,7 @@ O `curl` grava os cookies `__Host-`/`__Secure-` com o prefixo `#HttpOnly_` no `j
 - Os dados do job (destinatário e link com o token) vão cifrados (AES-256-GCM, chave derivada de `EMAIL_PAYLOAD_SECRET`): o banco não guarda o token em claro nem na fila. Jobs concluídos somem em 1 dia.
 - Fila `email.send`: até 3 tentativas (`retryLimit: 2`) com espera crescente (30 s, depois 1 a 2 min). O worker renderiza o template (texto + HTML simples em pt-BR, com a cor da marca), envia por nodemailer e marca `sent`; a última falha marca `failed` com o erro.
 - Todo e-mail diz no rodapé para não responder e onde pedir ajuda (**RN-01.21**): o colaborador é orientado a falar com o responsável pela barraca; os demais, com a equipe do Varal (`SUPPORT_CONTACT`, se definido).
-- **RN-01.04:** `EmailService.usage(mês)` conta os e-mails `queued` e `sent` do mês no calendário de São Paulo (Temporal) e devolve o nível: `warning` a partir de 8.000, `critical` a partir de 10.000. No crítico, só os tipos críticos continuam (`EMAIL_CRITICALITY`; no MVP todos são convites e redefinições, portanto críticos); os demais viram `failed` sem envio. `GET /api/v1/admin/emails/usage?month=AAAA-MM` exige a sessão do admin; a permissão `emails:read` entra com o RBAC da spec 02.
+- **RN-01.04:** `EmailService.usage(mês)` conta os e-mails `queued` e `sent` do mês no calendário de São Paulo (Temporal) e devolve o nível: `warning` a partir de 8.000, `critical` a partir de 10.000. No crítico, só os tipos críticos continuam (`EMAIL_CRITICALITY`; no MVP todos são convites e redefinições, portanto críticos); os demais viram `failed` sem envio. `GET /api/v1/admin/emails/usage?month=AAAA-MM` exige a sessão do admin com `emails:read` (RBAC da spec 02).
 - Tipos: `owner_invite`, `owner_password_reset`, `staff_password_reset`, `admin_invite`, `admin_password_reset`.
 - Em desenvolvimento, as mensagens chegam no Mailpit (`http://localhost:8025`). O teste de ponta a ponta (`test/integration/email.int-spec.ts`) pede uma redefinição, lê o e-mail pela API do Mailpit e usa o link; ele é pulado se o Mailpit não estiver acessível (`MAILPIT_URL`, padrão `http://localhost:8025`).
 
@@ -291,7 +354,8 @@ O `curl` grava os cookies `__Host-`/`__Secure-` com o prefixo `#HttpOnly_` no `j
 `PgBossService` sobe com a aplicação (início em segundo plano, com novas tentativas e espera crescente, para a API subir mesmo com o banco fora) e para no shutdown. Usa o schema `pgboss` e no máximo 3 conexões (as outras 7 do Varal são do pool da API). Filas criadas com `createQueue` no boot pelos módulos (`register`):
 
 - `email.send`: envio de e-mail (acima);
-- `maintenance.cleanup`: todo dia às 04:00 (São Paulo), apaga chaves de idempotência vencidas, sessões encerradas ou vencidas há mais de 30 dias, links usados ou vencidos com mais de 1 dia e contadores de login parados há 1 dia.
+- `maintenance.cleanup`: todo dia às 04:00 (São Paulo), apaga chaves de idempotência vencidas, sessões encerradas ou vencidas há mais de 30 dias, links usados ou vencidos com mais de 1 dia e contadores de login parados há 1 dia;
+- `admin.minutely`: a cada minuto, publica os comunicados agendados que chegaram na data e marca como `expired` os "entrar como" que passaram dos 60 minutos (spec 02, abaixo).
 
 ## Contratos (OpenAPI)
 

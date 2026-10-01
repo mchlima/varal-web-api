@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 
 import { AdminModule } from './admin/admin.module.js';
+import { AnnouncementsModule } from './announcements/announcements.module.js';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { ConfigModule } from './config/config.module.js';
@@ -15,6 +16,7 @@ import { MenuModule } from './menu/menu.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { StaffModule } from './staff/staff.module.js';
+import { SupportAccessModule } from './support-access/support-access.module.js';
 import { UnitsModule } from './units/units.module.js';
 
 @Module({
@@ -28,6 +30,8 @@ import { UnitsModule } from './units/units.module.js';
     EmailModule,
     AuthModule,
     AdminModule,
+    AnnouncementsModule,
+    SupportAccessModule,
     RealtimeModule,
     UnitsModule,
     MenuModule,

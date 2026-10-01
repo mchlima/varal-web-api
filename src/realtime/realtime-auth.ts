@@ -13,6 +13,9 @@ export interface SocketSession {
   subjectId: string;
   organizationId: string;
   deviceId: string;
+  /** "Entrar como" (spec 02): the admin acting as the owner, and the impersonation. */
+  impersonatorId: string | null;
+  impersonationId: string | null;
   /** End of the access token used in the handshake: the socket is disconnected then. */
   accessTokenExpiresAt: Date;
 }
@@ -81,7 +84,7 @@ export class RealtimeAuthenticator {
     if (!authenticated) {
       throw new RealtimeConnectError('UNAUTHENTICATED');
     }
-    const { session, claims } = authenticated;
+    const { session, claims, impersonation } = authenticated;
     const deviceId = parsedAuth.data.deviceId.toLowerCase();
     if (
       session.deviceId.toLowerCase() !== deviceId ||
@@ -96,6 +99,8 @@ export class RealtimeAuthenticator {
       subjectId: session.subjectId,
       organizationId: session.organizationId,
       deviceId,
+      impersonatorId: impersonation?.platformAdminId ?? null,
+      impersonationId: impersonation?.id ?? null,
       accessTokenExpiresAt: claims.expiresAt,
     };
   }
