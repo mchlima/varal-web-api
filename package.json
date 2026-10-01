@@ -23,6 +23,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:generate": "prisma generate",
     "db:seed": "node --import @swc-node/register/esm-register scripts/seed.ts",
+    "admin:create": "node --import @swc-node/register/esm-register src/cli/create-platform-admin.ts",
     "postinstall": "prisma generate"
   },
   "dependencies": {
