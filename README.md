@@ -6,13 +6,14 @@ Specs e decisões do produto: [varal-docs](https://github.com/mchlima/varal-docs
 
 ## Stack
 
-Node 26 (`>=26`, ver `.nvmrc`), pnpm 10, NestJS 12 (ESM, Express 5), TypeScript estrito, zod 4 (validação nativa do Nest via Standard Schema), Prisma 7.10.0 com `@prisma/adapter-pg`, PostgreSQL 17, OpenAPI 3.1 com `@nestjs/swagger`, Vitest 5 com SWC, ESLint 10 e Prettier.
+Node 26 (`>=26`, ver `.nvmrc`), pnpm 10, NestJS 12 (ESM, Express 5), TypeScript estrito, zod 4 (validação nativa do Nest via Standard Schema), Prisma 7.10.0 com `@prisma/adapter-pg`, PostgreSQL 17, pg-boss 12 (filas), `@node-rs/argon2`, `jose` (JWT), nodemailer, OpenAPI 3.1 com `@nestjs/swagger`, Vitest 5 com SWC, ESLint 10 e Prettier.
 
 ## Primeiros passos
 
 ```bash
 git config core.hooksPath .githooks          # uma vez por clone (bloqueio da main)
 docker compose -f ../varal-infra/dev/compose.yml up -d   # Postgres de desenvolvimento (varal-dev-db)
+# Mailpit para os e-mails de desenvolvimento: SMTP em localhost:1025, caixa em http://localhost:8025
 scripts/worktree.sh new feat/minha-tarefa    # worktree com porta, .env.local, dependências e banco próprios
 ```
 
@@ -42,6 +43,10 @@ Saúde: `GET /api/v1/health` responde `{ "status": "ok", "db": "ok" | "unavailab
 
 Variáveis em [`.env.example`](.env.example), validadas com zod no boot (a API não sobe se estiverem erradas). Em desenvolvimento, `.env.local` e `.env` são carregados nessa ordem.
 
+- `AUTH_PANEL_JWT_SECRET` e `AUTH_ADMIN_JWT_SECRET` (assinatura do token de acesso, um por contexto, diferentes entre si) e `EMAIL_PAYLOAD_SECRET` (cifra dos jobs de e-mail): mínimo de 32 caracteres. Obrigatórios em produção; fora dela, se faltarem, a API gera valores aleatórios a cada início. O `scripts/worktree.sh new` grava valores aleatórios no `.env.local`.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` (padrão `Varal <nao-responda@kratinho.com.br>`), `SUPPORT_CONTACT` (opcional, rodapé dos e-mails). Desenvolvimento: Mailpit em `localhost:1025`. Produção: SMTP Locaweb, com `SMTP_USER` e `SMTP_PASSWORD` obrigatórios e STARTTLS exigido quando `SMTP_SECURE=false`; as credenciais ficam só no `.env` do VPS.
+- `PANEL_URL` e `ADMIN_URL`: base dos links de convite e redefinição (dev `http://localhost:3100` e `http://localhost:3200`; https obrigatório em produção).
+
 ## Worktrees (spec 01, seção 4.1)
 
 ```bash
@@ -68,7 +73,9 @@ Schema em [`prisma/schema.prisma`](prisma/schema.prisma), migration em `prisma/m
 
 `RequestContextMiddleware` abre um `AsyncLocalStorage` por requisição com `requestId` (devolvido em `X-Request-Id`), `deviceId` (`X-Device-Id`, UUID; inválido → 400), `ip` (de `X-Forwarded-For` só vindo de proxy em rede privada, RN-01.19) e `auth`.
 
-**Ponto de integração da fase 1b:** o guard de autenticação valida o cookie e chama `setAuthContext({ organizationId, actor, impersonatorId })` uma única vez por requisição (uma segunda chamada falha). Até lá, os testes usam `test/support/stub-auth.ts`, que lê cabeçalhos `X-Test-*`; ele nunca é importado por `src/`. Fora de HTTP (jobs, scripts, testes), use `runWithContext(systemContext({ auth }), fn)`.
+O `AuthGuard` (seção Autenticação) valida o cookie e chama `setAuthContext({ organizationId, actor, impersonatorId, sessionId })` uma única vez por requisição (uma segunda chamada falha). Fora de HTTP (jobs, scripts, testes), use `runWithContext(systemContext({ auth }), fn)`.
+
+Nos testes, `createTestApp()` troca o `AuthGuard` pelo `test/support/stub-auth.ts`, que lê cabeçalhos `X-Test-*` (nunca importado por `src/`); `createTestApp({ auth: 'real' })` mantém a autenticação real, com os cookies do login (`test/support/auth-kit.ts`).
 
 ### Isolamento entre organizações
 
@@ -84,7 +91,7 @@ Schema em [`prisma/schema.prisma`](prisma/schema.prisma), migration em `prisma/m
 - Consultas do Prisma são preguiçosas e rodam no `await`: aguarde dentro do contexto (`runWithContext(ctx, async () => await query)`), senão o contexto se perde e a consulta falha.
 - Tabelas com `organization_id` opcional (`sessions`, `audit_logs`, `email_logs`, `idempotency_keys`) guardam também dados da plataforma e não são filtradas automaticamente.
 
-**Teste de isolamento obrigatório** para cada recurso novo, com o kit em [`test/support/isolation-kit.ts`](test/support/isolation-kit.ts): `describeTenantIsolation('Modelo', {...})` (camada de dados) e `expectNotFoundForOtherTenant(app, {...})` (HTTP, 404).
+**Teste de isolamento obrigatório** para cada recurso novo, com o kit em [`test/support/isolation-kit.ts`](test/support/isolation-kit.ts): `describeTenantIsolation('Modelo', {...})` (camada de dados) e `expectNotFoundForOtherTenant(app, {...})` (HTTP, 404; com `as` para a autenticação simulada ou `headers: { Cookie }` para a real).
 
 ### Erros
 
@@ -96,7 +103,7 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 ### Idempotência
 
-`@Idempotent()` numa rota de escrita aceita `Idempotency-Key` (UUID). A primeira requisição reserva a chave por sujeito; o handler roda numa transação ambiente (`prisma.transaction` entra nela) e a resposta é gravada nessa mesma transação. Repetição em 24 h devolve o mesmo status e corpo com `Idempotent-Replayed: true`. Mesma chave com outro corpo → 409 `IDEMPOTENCY_KEY_REUSED`; enquanto a primeira roda → 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Respostas 4xx são guardadas; 5xx liberam a chave. `IdempotencyService.purgeExpired()` apaga as vencidas; o job diário que a chama entra com o pg-boss (fase 1b).
+`@Idempotent()` numa rota de escrita aceita `Idempotency-Key` (UUID). A primeira requisição reserva a chave por sujeito; o handler roda numa transação ambiente (`prisma.transaction` entra nela) e a resposta é gravada nessa mesma transação. Repetição em 24 h devolve o mesmo status e corpo com `Idempotent-Replayed: true`. Mesma chave com outro corpo → 409 `IDEMPOTENCY_KEY_REUSED`; enquanto a primeira roda → 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Respostas 4xx são guardadas; 5xx liberam a chave. `IdempotencyService.purgeExpired()` apaga as vencidas, chamada pelo job diário de limpeza (seção Jobs).
 
 ### Concorrência
 
@@ -112,7 +119,65 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 ### Seed
 
-`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça", dono `dono@varal.local`, colaboradores `ana` e `bruno` e admin `admin@varal.local`. As senhas ficam nulas: a fase 1b (argon2 e convites) define as senhas de desenvolvimento. Estações e fluxo padrão vêm com a spec 03.
+`pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça", dono `dono@varal.local`, colaboradores `ana` e `bruno` e admin `admin@varal.local`. Estações e fluxo padrão vêm com a spec 03.
+
+**Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
+
+```bash
+# Login do dono com curl (cookies em jar.txt); o X-Device-Id é um UUID qualquer do aparelho
+curl -c jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'content-type: application/json' \
+  -d '{"email":"dono@varal.local","password":"varal12345"}' http://localhost:3000/api/v1/auth/owner/login
+curl -b jar.txt http://localhost:3000/api/v1/auth/me
+```
+
+## Autenticação (spec 01, seção 7)
+
+Rotas em [`src/auth`](src/auth): `POST /auth/owner/login`, `POST /auth/staff/login` (`accessCode`, `username`, `password`; CA-01.03), `GET /auth/access-code/{code}`, `POST /auth/refresh`, `POST /auth/logout`, `GET /auth/me`, `POST /auth/password/forgot|reset|change` e, no contexto do admin, `POST /admin/auth/login|refresh|logout`, `GET /admin/auth/me` e `POST /admin/auth/password/forgot|reset|change`.
+
+**Senhas.** argon2id (`memoryCost 19456`, `timeCost 2`, `parallelism 1`), refeito no login quando os parâmetros mudam; mínimo de 8 caracteres. Usuário inexistente, senha errada, usuário inativo ou sem senha dão a mesma resposta (`INVALID_CREDENTIALS`), depois do mesmo trabalho do argon2. **Bloqueio:** 10 erros seguidos para o mesmo identificador (e-mail; código + usuário no colaborador) bloqueiam por 15 minutos (`429 LOGIN_TEMPORARILY_LOCKED`), inclusive para identificadores que não existem, então o bloqueio não revela quem existe. O contador fica no banco (`login_throttles`, com hash do identificador) e zera no login certo.
+
+**Sessão.** Token de acesso JWT HS256 de 15 min e token de renovação opaco (`<id da sessão>.<32 bytes>`) de 30 dias, só com o hash SHA-256 no banco. Cada renovação gira o token e empurra a validade 30 dias (validade deslizante).
+
+| Contexto         | Cookie de acesso                   | Cookie de renovação                                   | Segredo do JWT                                   |
+| ---------------- | ---------------------------------- | ----------------------------------------------------- | ------------------------------------------------ |
+| App dos clientes | `__Host-varal_at` (`Path=/`)       | `__Secure-varal_rt` (`Path=/api/v1/auth`)             | `AUTH_PANEL_JWT_SECRET`, audiência `varal-panel` |
+| Admin            | `__Host-varal_admin_at` (`Path=/`) | `__Secure-varal_admin_rt` (`Path=/api/v1/admin/auth`) | `AUTH_ADMIN_JWT_SECRET`, audiência `varal-admin` |
+
+- Todos `HttpOnly`, `Secure`, `SameSite=Strict`, sem `Domain`. O prefixo `__Host-` exige `Path=/` e impede que outro subdomínio de `kratinho.com.br` grave ou sobrescreva o cookie de acesso. Navegadores aceitam `Secure` em `http://localhost`.
+- **Contextos separados (CA-01.04):** rotas em `/api/v1/admin` (pelo caminho, sem diferenciar maiúsculas, ou por `@AdminArea()`) só aceitam o cookie do admin; as demais só o do app. Segredo, audiência e tipo de sujeito diferentes: um token nunca vale no outro contexto.
+- **Guard global (`AuthGuard`)**: rotas são protegidas por padrão; as abertas usam `@Public()`. O guard confere o JWT **e a linha da sessão a cada requisição** (uma busca por chave primária): logout, troca ou redefinição de senha e desativação cortam o acesso na hora, sem esperar os 15 min do token (o CA-01.05 aceita até 15 min; aqui é imediato no HTTP). O `X-Device-Id`, quando enviado, tem de ser o da sessão.
+- `X-Device-Id` (UUID) é obrigatório no login e gravado na sessão. Novo login do mesmo sujeito no mesmo aparelho encerra a sessão anterior desse aparelho.
+- **Reuso do token de renovação:** apresentar o token anterior à última rotação revoga a sessão inteira (`refresh_token_reused`), porque indica cópia. Nos 30 s seguintes à rotação ele só é recusado, sem revogar (duas abas ou um reenvio depois de resposta perdida). Só o token imediatamente anterior é reconhecido; tokens mais antigos são apenas recusados.
+- **Logout** encerra a sessão do aparelho (funciona só com o cookie de renovação, se o de acesso já venceu). **Troca de senha** encerra todas as sessões do usuário e abre uma nova para o aparelho atual. **Redefinição** (link) encerra todas. `AuthService.revokeSessionsInTransaction` serve à desativação de colaborador (RN-03.17, spec 03).
+- **Ponto de integração da fase 1c:** toda revogação emite, depois do commit, o evento interno `auth.sessions_revoked` (`AuthEvents.onSessionsRevoked`), para o gateway do Socket.IO desconectar os sockets daquelas sessões na hora.
+- Organizações `suspended` ou `canceled` continuam entrando: a RN-01.01 só bloqueia abrir turno.
+- **Auditoria:** `auth.login`, `auth.logout`, `auth.password_changed`, `auth.password_reset`, `auth.invite_accepted`, `auth.password_link_issued` e `auth.sessions_revoked`. Falhas de login **não** vão para `audit_logs` (somente inserção; tentativas com identificadores inventados encheriam a tabela): alimentam o bloqueio e o bloqueio vai para o log da aplicação.
+- **Limite por IP em memória** (`RateLimiter`): logins 20/min, "esqueci a senha" 5 a cada 15 min, consulta de código 30/min, redefinição e troca de senha 10 a cada 15 min (`429 RATE_LIMITED`). Vale por instância e zera no restart; com mais de uma instância precisaria ir para o banco.
+- RBAC do admin (permissões por rota) e "entrar como" (`sessions.impersonation_id`, `impersonatorId` no contexto) chegam com a spec 02.
+
+**Convite e redefinição (seção 7.4).** `PasswordTokenService`: 32 bytes aleatórios, só o hash no banco, uso único; gerar um novo invalida os anteriores do mesmo tipo; convite 7 dias, redefinição 1 h; **RN-01.02** no máximo 3 links de redefinição por usuário por hora. `PasswordLinkService` gera o link `{PANEL_URL|ADMIN_URL}/definir-senha#token=...&tipo=convite|redefinicao` (o token vai no fragmento, que o navegador não envia a servidores nem em `Referer`) e enfileira o e-mail:
+
+- `issueOwnerInvite(tx, ownerId)`: chamado pelo admin ao criar a organização (fase 3, RN-02.09), na mesma transação;
+- `requestOwnerPasswordReset(email)` / `requestAdminPasswordReset(email)`: "Esqueci a senha", sempre a mesma resposta e pelo menos 400 ms, exista ou não o e-mail (**RN-01.03**);
+- `issueStaffPasswordReset(staffMemberId, { sendEmail })`: redefinição do colaborador pelo dono (RN-03.18; a rota fica para a spec 03); devolve o link para copiar ou mandar por WhatsApp;
+- `issueAdminInvite(tx, adminId)`: convite de admin (spec 02).
+
+## E-mail (spec 01, seção 9)
+
+- `EmailService.enqueue(tx, mensagem, organizationId)` roda **na transação da ação**: grava `email_logs` (`queued`) e o job do pg-boss pelo mesmo `tx` do Prisma (adapter `fromPrisma` do pg-boss 12, que executa o SQL do pg-boss com `$queryRawUnsafe` na transação). Ação desfeita não envia nada; ação confirmada sempre tem o e-mail na fila.
+- Os dados do job (destinatário e link com o token) vão cifrados (AES-256-GCM, chave derivada de `EMAIL_PAYLOAD_SECRET`): o banco não guarda o token em claro nem na fila. Jobs concluídos somem em 1 dia.
+- Fila `email.send`: até 3 tentativas (`retryLimit: 2`) com espera crescente (30 s, depois 1 a 2 min). O worker renderiza o template (texto + HTML simples em pt-BR, com a cor da marca), envia por nodemailer e marca `sent`; a última falha marca `failed` com o erro.
+- Todo e-mail diz no rodapé para não responder e onde pedir ajuda (**RN-01.21**): o colaborador é orientado a falar com o responsável pela barraca; os demais, com a equipe do Varal (`SUPPORT_CONTACT`, se definido).
+- **RN-01.04:** `EmailService.usage(mês)` conta os e-mails `queued` e `sent` do mês no calendário de São Paulo (Temporal) e devolve o nível: `warning` a partir de 8.000, `critical` a partir de 10.000. No crítico, só os tipos críticos continuam (`EMAIL_CRITICALITY`; no MVP todos são convites e redefinições, portanto críticos); os demais viram `failed` sem envio. `GET /api/v1/admin/emails/usage?month=AAAA-MM` exige a sessão do admin; a permissão `emails:read` entra com o RBAC da spec 02.
+- Tipos: `owner_invite`, `owner_password_reset`, `staff_password_reset`, `admin_invite`, `admin_password_reset`.
+- Em desenvolvimento, as mensagens chegam no Mailpit (`http://localhost:8025`). O teste de ponta a ponta (`test/integration/email.int-spec.ts`) pede uma redefinição, lê o e-mail pela API do Mailpit e usa o link; ele é pulado se o Mailpit não estiver acessível (`MAILPIT_URL`, padrão `http://localhost:8025`).
+
+## Jobs (pg-boss 12)
+
+`PgBossService` sobe com a aplicação (início em segundo plano, com novas tentativas e espera crescente, para a API subir mesmo com o banco fora) e para no shutdown. Usa o schema `pgboss` e no máximo 3 conexões (as outras 7 do Varal são do pool da API). Filas criadas com `createQueue` no boot pelos módulos (`register`):
+
+- `email.send`: envio de e-mail (acima);
+- `maintenance.cleanup`: todo dia às 04:00 (São Paulo), apaga chaves de idempotência vencidas, sessões encerradas ou vencidas há mais de 30 dias, links usados ou vencidos com mais de 1 dia e contadores de login parados há 1 dia.
 
 ## Contratos (OpenAPI)
 
