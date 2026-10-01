@@ -42,9 +42,12 @@ function forbidden(message: string): AppError {
   return AppError.of('FORBIDDEN', { message });
 }
 
-export function assertCanOperateCash(access: OperatorAccess): void {
+export function assertCanOperateCash(
+  access: OperatorAccess,
+  message = 'Só o dono ou quem opera o caixa nesta unidade pode abrir e fechar turno.',
+): void {
   if (!canOperateCash(access)) {
-    throw forbidden('Só o dono ou quem opera o caixa nesta unidade pode abrir e fechar turno.');
+    throw forbidden(message);
   }
 }
 

@@ -5,7 +5,11 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, i
 
 import { hashPassword } from '../../src/auth/password-hasher.js';
 import { RateLimiter } from '../../src/auth/rate-limit.js';
+import type { CashRegisterDto, PaymentResultDto } from '../../src/operation/cash.schemas.js';
 import {
+  CashRegisterClosed,
+  CashRegisterOpened,
+  CashRegisterUpdated,
   OrderCompleted,
   OrderCreated,
   OrderItemCanceled,
@@ -19,6 +23,7 @@ import type {
   OrderDto,
   ShiftDto,
   TabDto,
+  TabSummaryDto,
 } from '../../src/operation/operation.schemas.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
 import {
@@ -313,5 +318,122 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     await settle(300);
     expect(counter.events.slice(before)).toEqual([]);
     expect(named(kitchen.events, OrderCreated.type)).toHaveLength(0);
+  });
+
+  /** The last `name` event received, after the events of the last action settled. */
+  async function latest<T>(events: Received[], name: string): Promise<Envelope<T>> {
+    await settle(300);
+    const found = named<T>(events, name).at(-1);
+    if (!found) {
+      throw new Error(`no "${name}" event`);
+    }
+    return found;
+  }
+
+  it('phase 5 adjustment: a stage change that moves the ready or late counters emits tab.updated', async () => {
+    const f = await floor('Contadores');
+    const counter = await open(f.counter);
+    const shift = await post<ShiftDto>(f.owner, `/units/${f.setup.tenant.unitId}/shifts`, {
+      type: 'direct_sale',
+    });
+    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs`, {
+      customerName: 'Dona Marta',
+    });
+    const order = await post<OrderDto>(f.counter, `/tabs/${tab.id}/orders`, {
+      items: [
+        {
+          productId: f.setup.products.skewer,
+          quantity: 2,
+          modifierIds: [f.setup.modifiers.medium],
+        },
+      ],
+    });
+    await settle(200);
+    const tabUpdates = () => named<TabSummaryDto>(counter.events, TabUpdated.type);
+    const before = tabUpdates().length;
+    const item = order.items[0];
+    if (!item) {
+      throw new Error('no item');
+    }
+    // Recebido → Preparando: no counter changes, no tab.updated.
+    const preparing = await post<ItemChangeDto>(f.kitchen, `/order-items/${item.id}/advance`, {
+      version: item.version,
+    });
+    await settle(200);
+    expect(tabUpdates()).toHaveLength(before);
+    // Preparando → Pronto: ready to deliver.
+    const ready = await post<ItemChangeDto>(f.kitchen, `/order-items/${item.id}/advance`, {
+      version: preparing.changed.version,
+    });
+    const readyEvent = await latest<TabSummaryDto>(counter.events, TabUpdated.type);
+    expect(readyEvent.data).toMatchObject({ id: tab.id, readyItemCount: 2, lateItemCount: 0 });
+    expect(readyEvent.version).toBeGreaterThan(tab.version);
+    // Pronto → Entregue (the counter delivers): the counter goes back to zero.
+    await post<ItemChangeDto>(f.counter, `/order-items/${item.id}/advance`, {
+      version: ready.changed.version,
+    });
+    const delivered = await latest<TabSummaryDto>(counter.events, TabUpdated.type);
+    expect(delivered.data).toMatchObject({ readyItemCount: 0 });
+    expect(delivered.version).toBeGreaterThan(readyEvent.version);
+  });
+
+  it('CA-04.10 and spec 05 events: "paga antes" reaches the kitchen only with its payment; payments and registers are announced', async () => {
+    const f = await floor('Paga antes em tempo real');
+    const counter = await open(f.counter);
+    const kitchen = await open(f.kitchen);
+    const shift = await post<ShiftDto>(f.owner, `/units/${f.setup.tenant.unitId}/shifts`, {
+      type: 'direct_sale',
+    });
+    const register = await post<CashRegisterDto>(f.counter, `/shifts/${shift.id}/cash-registers`, {
+      openingFloatCents: 5000,
+    });
+    const opened = await latest<CashRegisterDto>(counter.events, CashRegisterOpened.type);
+    expect(opened.data).toMatchObject({ id: register.id, name: 'Caixa 1' });
+
+    const items = [
+      { productId: f.setup.products.skewer, quantity: 1, modifierIds: [f.setup.modifiers.medium] },
+    ];
+    const refused = await http()
+      .post(`${API}/shifts/${shift.id}/tabs/pay-first`)
+      .set(headers(f.counter))
+      .send({ customerName: 'Lucas', items, payments: [{ method: 'pix', amountCents: 100 }] });
+    expect(refused.status).toBe(409);
+    await settle(300);
+    expect(named(kitchen.events, OrderCreated.type)).toHaveLength(0);
+    expect(named(counter.events, TabCreated.type)).toHaveLength(0);
+
+    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs/pay-first`, {
+      customerName: 'Lucas',
+      items,
+      payments: [{ method: 'cash', tenderedCents: 2000 }],
+    });
+    const sent = await latest<OrderDto>(kitchen.events, OrderCreated.type);
+    expect(sent.data.tabId).toBe(tab.id);
+    const created = await latest<TabSummaryDto>(counter.events, TabCreated.type);
+    expect(created.data).toMatchObject({ id: tab.id, status: 'paid', balanceCents: 0 });
+    const cashUpdate = await latest<CashRegisterDto>(counter.events, CashRegisterUpdated.type);
+    expect(cashUpdate.data.cash.paymentsCents).toBe(1200);
+
+    // Reversal: tab.updated (back to closing) and cash_register.updated.
+    const payment = tab.payments[0];
+    if (!payment) {
+      throw new Error('no payment');
+    }
+    await post<PaymentResultDto>(f.counter, `/payments/${payment.id}/reverse`, {
+      reason: 'Cobrado errado',
+    });
+    const reopened = await latest<TabSummaryDto>(counter.events, TabUpdated.type);
+    expect(reopened.data).toMatchObject({ id: tab.id, status: 'closing', balanceCents: 1200 });
+    await settle(200);
+    expect(named(counter.events, CashRegisterUpdated.type)).toHaveLength(2);
+
+    await post<CashRegisterDto>(f.counter, `/cash-registers/${register.id}/close`, {
+      counts: ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
+        method,
+        informedCents: method === 'cash' ? 5000 : 0,
+      })),
+    });
+    const closed = await latest<CashRegisterDto>(counter.events, CashRegisterClosed.type);
+    expect(closed.data.status).toBe('closed');
   });
 });

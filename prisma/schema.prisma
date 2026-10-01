@@ -193,6 +193,32 @@ enum OrderStatus {
   @@map("order_status")
 }
 
+/// Payment methods (spec 05, RN-05.04). Only registered: no processing.
+enum PaymentMethod {
+  pix
+  cash
+  credit_card
+  debit_card
+
+  @@map("payment_method")
+}
+
+/// Cash register of a shift (spec 05, section 5). A closed register is never reopened (RN-05.21).
+enum CashRegisterStatus {
+  open
+  closed
+
+  @@map("cash_register_status")
+}
+
+/// `withdrawal`: sangria; `deposit`: suprimento (RN-05.18).
+enum CashMovementType {
+  withdrawal
+  deposit
+
+  @@map("cash_movement_type")
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tenants
 // ---------------------------------------------------------------------------------------------
@@ -231,6 +257,11 @@ model Organization {
   orders                Order[]
   orderItems            OrderItem[]
   orderItemModifiers    OrderItemModifier[]
+  // Spec 05 (fechamento e caixa).
+  cashRegisters         CashRegister[]
+  cashMovements         CashMovement[]
+  cashRegisterCounts    CashRegisterCount[]
+  payments              Payment[]
 
   @@map("organizations")
 }
@@ -259,6 +290,7 @@ model Unit {
   shifts               Shift[]
   tabs                 Tab[]
   orderItems           OrderItem[]
+  cashRegisters        CashRegister[]
 
   @@unique([organizationId, name])
   /// Target of composite foreign keys that keep child rows in the same organization.
@@ -521,9 +553,11 @@ model Shift {
   organization Organization    @relation(fields: [organizationId], references: [id])
   unit         Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
   agreement    ShiftAgreement?
-  prices       ShiftPrice[]
-  tabs         Tab[]
-  orders       Order[]
+  prices        ShiftPrice[]
+  tabs          Tab[]
+  orders        Order[]
+  cashRegisters CashRegister[]
+  payments      Payment[]
 
   @@unique([organizationId, id])
   @@index([organizationId, unitId, openedAt])
@@ -604,6 +638,7 @@ model Tab {
   unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
   orders       Order[]
   items        OrderItem[]
+  payments     Payment[]
 
   @@unique([shiftId, number])
   @@unique([organizationId, id])
@@ -717,6 +752,118 @@ model OrderItemModifier {
 
   @@index([organizationId, orderItemId])
   @@map("order_item_modifiers")
+}
+
+/// A cash register of a shift (spec 05, section 5): several may be open at once (RN-05.17).
+/// SQL-only: CHECK opening_float_cents >= 0; CHECK name 1..40 characters;
+/// CHECK (status = 'closed') = (closed_at IS NOT NULL); unique (shift_id, lower(name)).
+model CashRegister {
+  id                String             @id @default(uuid(7)) @db.Uuid
+  organizationId    String             @map("organization_id") @db.Uuid
+  shiftId           String             @map("shift_id") @db.Uuid
+  unitId            String             @map("unit_id") @db.Uuid
+  name              String
+  status            CashRegisterStatus @default(open)
+  /// Fundo de troco, in cash (RN-05.17).
+  openingFloatCents Int                @map("opening_float_cents")
+  openedByType      ActorType          @map("opened_by_type")
+  openedById        String?            @map("opened_by_id") @db.Uuid
+  openedAt          DateTime           @map("opened_at") @db.Timestamptz(3)
+  closedByType      ActorType?         @map("closed_by_type")
+  closedById        String?            @map("closed_by_id") @db.Uuid
+  closedAt          DateTime?          @map("closed_at") @db.Timestamptz(3)
+  /// Required when any method closes with a difference (RN-05.20).
+  closingNote       String?            @map("closing_note")
+  /// Incremented on every payment, reversal, movement and on closing: version of `cash_register.*`.
+  version           Int                @default(0)
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  shift        Shift               @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  unit         Unit                @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  movements    CashMovement[]
+  counts       CashRegisterCount[]
+  payments     Payment[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, shiftId, status])
+  @@map("cash_registers")
+}
+
+/// Sangria or suprimento (RN-05.18). Never deleted.
+/// SQL-only: CHECK amount_cents > 0; CHECK reason 1..140 characters.
+model CashMovement {
+  id             String           @id @default(uuid(7)) @db.Uuid
+  organizationId String           @map("organization_id") @db.Uuid
+  cashRegisterId String           @map("cash_register_id") @db.Uuid
+  type           CashMovementType
+  amountCents    Int              @map("amount_cents")
+  reason         String
+  createdByType  ActorType        @map("created_by_type")
+  createdById    String?          @map("created_by_id") @db.Uuid
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+
+  @@index([organizationId, cashRegisterId])
+  @@map("cash_movements")
+}
+
+/// What was counted per method when the register closed (RN-05.20).
+/// SQL-only: CHECK informed_cents >= 0; CHECK difference_cents = informed_cents - expected_cents.
+model CashRegisterCount {
+  id              String        @id @default(uuid(7)) @db.Uuid
+  organizationId  String        @map("organization_id") @db.Uuid
+  cashRegisterId  String        @map("cash_register_id") @db.Uuid
+  method          PaymentMethod
+  expectedCents   Int           @map("expected_cents")
+  informedCents   Int           @map("informed_cents")
+  differenceCents Int           @map("difference_cents")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+
+  @@unique([cashRegisterId, method])
+  @@index([organizationId, cashRegisterId])
+  @@map("cash_register_counts")
+}
+
+/// A registered payment (spec 05, section 4). Reversed, never deleted (RN-05.15). `shift_id` is the
+/// shift the money came in, which differs from the tab's on a credit settlement (spec 06).
+/// SQL-only: CHECK amount_cents > 0; cash has tendered/change (tendered = amount + change), the
+/// other methods have neither; reversal fields all set or all null, reason 1..140 characters.
+model Payment {
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  organizationId     String        @map("organization_id") @db.Uuid
+  tabId              String        @map("tab_id") @db.Uuid
+  shiftId            String        @map("shift_id") @db.Uuid
+  cashRegisterId     String        @map("cash_register_id") @db.Uuid
+  method             PaymentMethod
+  /// Applied amount (RN-05.09).
+  amountCents        Int           @map("amount_cents")
+  tenderedCents      Int?          @map("tendered_cents")
+  changeCents        Int?          @map("change_cents")
+  /// Settlement of a tab on credit (spec 06).
+  isCreditSettlement Boolean       @default(false) @map("is_credit_settlement")
+  receivedByType     ActorType     @map("received_by_type")
+  receivedById       String?       @map("received_by_id") @db.Uuid
+  reversedAt         DateTime?     @map("reversed_at") @db.Timestamptz(3)
+  reversedByType     ActorType?    @map("reversed_by_type")
+  reversedById       String?       @map("reversed_by_id") @db.Uuid
+  reversalReason     String?       @map("reversal_reason")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  tab          Tab          @relation(fields: [organizationId, tabId], references: [organizationId, id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+
+  @@index([organizationId, tabId])
+  @@index([organizationId, cashRegisterId])
+  @@map("payments")
 }
 
 // ---------------------------------------------------------------------------------------------

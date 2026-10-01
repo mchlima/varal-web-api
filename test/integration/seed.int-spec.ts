@@ -3,7 +3,7 @@ import { afterAll, describe, expect, inject, it } from 'vitest';
 import { verifyPassword } from '../../src/auth/password-hasher.js';
 import type { Env } from '../../src/config/env.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { SEED, SEED_MENU, SEED_TABS, seed } from '../../scripts/seed.js';
+import { SEED, SEED_MENU, SEED_PAY_FIRST, SEED_TABS, seed } from '../../scripts/seed.js';
 
 const databaseUrl = inject('databaseUrl');
 
@@ -91,9 +91,9 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     const result = await seed(platform);
     const shifts = await platform.shift.findMany({ where: { unitId: result.unitId } });
     expect(shifts).toHaveLength(1);
-    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 1 });
+    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 2 });
     const tabs = await platform.tab.findMany({
-      where: { shiftId: shifts[0]?.id },
+      where: { shiftId: shifts[0]?.id, mode: 'open_tab' },
       orderBy: { number: 'asc' },
       include: { items: { include: { stage: true } } },
     });
@@ -107,6 +107,38 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     for (const item of tabs.flatMap((tab) => tab.items)) {
       expect(item.stationId === null).toBe(item.stage.isFinal);
     }
+  });
+
+  it('spec 05: an open cash register with a partial Pix and a "paga antes" tab paid in cash', async () => {
+    const result = await seed(platform);
+    const shift = await platform.shift.findFirstOrThrow({
+      where: { unitId: result.unitId, status: 'open' },
+    });
+    const registers = await platform.cashRegister.findMany({
+      where: { shiftId: shift.id },
+      include: { payments: { include: { tab: true }, orderBy: { id: 'asc' } } },
+    });
+    expect(registers).toHaveLength(1);
+    expect(registers[0]).toMatchObject({
+      name: 'Caixa 1',
+      status: 'open',
+      openingFloatCents: 10_000,
+    });
+    const payments = registers[0]?.payments ?? [];
+    expect(payments.map((payment) => [payment.method, payment.tab.status])).toEqual([
+      ['pix', 'closing'],
+      ['cash', 'paid'],
+    ]);
+    const cash = payments.find((payment) => payment.method === 'cash');
+    expect(cash).toMatchObject({
+      amountCents: 1200,
+      tenderedCents: SEED_PAY_FIRST.tenderedCents,
+      changeCents: 800,
+    });
+    expect(cash?.tab).toMatchObject({
+      customerName: SEED_PAY_FIRST.customerName,
+      mode: 'pay_first',
+    });
   });
 
   it('sets the development password of the owner, the staff and the admin (only while empty)', async () => {
@@ -161,6 +193,8 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
         platform.order.count(),
         platform.orderItem.count(),
         platform.orderItemModifier.count(),
+        platform.cashRegister.count(),
+        platform.payment.count(),
       ]);
     const first = await seed(platform);
     const before = await counts();

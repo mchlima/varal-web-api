@@ -1125,7 +1125,7 @@ describe.skipIf(!databaseUrl)('operation: shifts, tabs, orders and items (spec 0
       );
       expect(returned.changed).toMatchObject({ wasted: true });
 
-      // RN-04.28: a paid tab (spec 05) refuses cancellations.
+      // RN-04.28: a paid tab refuses cancellations (spec 05: reverse the payment first).
       const other = firstItem(await sendOrder(c, tab.id, [skewer(c)]));
       await platform.tab.update({ where: { id: tab.id }, data: { status: 'paid' } });
       const paid = await http()
@@ -1133,7 +1133,14 @@ describe.skipIf(!databaseUrl)('operation: shifts, tabs, orders and items (spec 0
         .set(as(c.counter.auth))
         .send({ version: other.version, reason: 'Tarde' })
         .expect(409);
-      expect(errorOf(paid).code).toBe('TAB_CLOSED');
+      expect(errorOf(paid).code).toBe('TAB_PAID');
+      await platform.tab.update({ where: { id: tab.id }, data: { status: 'on_credit' } });
+      const onCredit = await http()
+        .post(`${API}/order-items/${other.id}/cancel`)
+        .set(as(c.counter.auth))
+        .send({ version: other.version, reason: 'Tarde' })
+        .expect(409);
+      expect(errorOf(onCredit).code).toBe('TAB_CLOSED');
     });
   });
 

@@ -124,7 +124,7 @@ Filtros de lista estendem o schema (`PaginationQuerySchema.extend({ status: ... 
 
 `pnpm db:seed`: organização "Espetinho do Piloto" (`pilot`, código `ESPT26`), unidade "Barraca da Praça" com o template padrão (Balcão, Cozinha, Balcão de entrega; Recebido → Preparando → Pronto → Entregue) e um cardápio de espetos (Espetos com "Ponto da carne" obrigatório, "Acompanhamentos" e "Retirar"; Porções; Bebidas no Balcão de entrega), dono `dono@varal.local`, colaboradores `ana` (Balcão e Balcão de entrega, opera caixa) e `bruno` (Cozinha) e admin `admin@varal.local` com o papel Super admin.
 
-Turno aberto de exemplo (spec 04, criado só se a unidade nunca teve turno): comandas 1 "Dona Marta" (espetos em Preparando, atrasados, e refrigerantes em Pronto), 2 "Seu João" (kafta em Recebido, frango dividido entre Preparando e Pronto, pão de alho entregue) e 3 "Mesa da família" (em fechamento, tudo entregue).
+Turno aberto de exemplo (spec 04, criado só se a unidade nunca teve turno): comandas 1 "Dona Marta" (espetos em Preparando, atrasados, e refrigerantes em Pronto), 2 "Seu João" (kafta em Recebido, frango dividido entre Preparando e Pronto, pão de alho entregue) e 3 "Mesa da família" (em fechamento, tudo entregue). Spec 05 (criado enquanto o turno aberto não tem caixa): "Caixa 1" aberto pela `ana` com R$ 100,00 de fundo, um Pix de metade do total na "Mesa da família" e a comanda 4 "Lucas", paga antes, em dinheiro com troco.
 
 **Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
 
@@ -232,7 +232,7 @@ Criados como rascunho; `POST /publish` publica agora ou, com `publishAt` no futu
 
 ### Métricas (seção 6)
 
-Período em dias de Brasília (padrão: últimos 30). Organizações por situação e último acesso já vêm dos dados atuais; turnos, comandas, valor vendido e ticket médio ficam em zero até as specs 04 a 06: o único lugar a preencher é `MetricsService.operationalTotals`.
+Período em dias de Brasília (padrão: últimos 30). Organizações por situação e último acesso vêm das sessões; turnos fechados (total e por semana), organizações ativas (turno aberto no período), comandas pagas/penduradas/quitadas, valor vendido e ticket médio vêm de `MetricsService.operationalTotals` (specs 04 e 05; as penduradas e quitadas passam a aparecer com a spec 06).
 
 ### "Entrar como" (seção 7)
 
@@ -454,13 +454,14 @@ Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (
 - **Fechar turno (RN-04.07, RN-04.08, CA-04.09):** trava o turno, recusa com `409 SHIFT_HAS_PENDING_ITEMS` e `details` no formato `ShiftPendingItems` (`tabs` em `open`/`closing`, `cashRegisters`). Itens ainda não finais (de comandas pagas, a partir da spec 05) vão à etapa final, com `shift.items_finalized` na auditoria. Turno fechado não aceita mais nada (`SHIFT_CLOSED`).
 - **Auditoria:** `shift.opened|prices_updated|items_finalized|closed`, `tab.opened|bill_requested|reopened|canceled`, `order.created|completed`, `order_item.stage_changed` (avançar), `order_item.stage_reverted` (voltar) e `order_item.canceled` (motivo, quantidade, perda).
 
-### Fronteira com a spec 05 (fase 6)
+### Integração com a spec 05 (fase 6)
 
-- **Paga antes** (`POST /shifts/{id}/tabs/pay-first`, CA-04.10) depende de pagamento e fica para a fase 6. O modelo já tem `tabs.mode` (`pay_first`, `open_tab`) e as situações `paid`, `on_credit`, `settled`; hoje só nasce `open_tab`.
-- `closing` → `paid` e pendurar (`on_credit`) entram com as specs 05 e 06.
-- **Caixas no fechamento do turno:** `ShiftsService.pendingItems` devolve `cashRegisters: []`; a spec 05 acrescenta ali a consulta dos caixas abertos do turno.
-- **Cancelar comanda** com pagamento registrado: a checagem de pagamentos entra em `TabsService.cancel` com a spec 05.
-- Desconto: as colunas `discount_type`, `discount_value`, `discount_reason` existem e entram no total (`discountCents`, RN-05.03), mas só a spec 05 as preenche. `customer_id` (fiado) fica para a spec 06.
+- **Paga antes** (`POST /shifts/{id}/tabs/pay-first`, CA-04.10): ver [Fechamento e caixa](#fechamento-e-caixa-spec-05). Comanda `pay_first` tem um único pedido: não reabre nem recebe outro pedido (`TAB_PAY_FIRST`).
+- `closing` → `paid` automático quando o saldo zera (RN-05.10); pendurar (`on_credit`) entra com a spec 06.
+- **Fechar turno** lista também os caixas abertos em `details.cashRegisters` (RN-04.07).
+- **Cancelar comanda** com pagamento não estornado: `409 TAB_HAS_PAYMENTS` (`details.paymentIds`); comanda `paid`: `TAB_PAID`.
+- **Cancelar item** de comanda `paid` (RN-04.28): `409 TAB_PAID` com `details.paymentIds`; o balcão estorna (a comanda volta a `closing`), cancela o item e recebe de novo (RN-05.14). Em `closing` com pagamento parcial, cancelar item que deixaria o total abaixo do já pago dá `TAB_PAYMENTS_EXCEED_TOTAL`; se o total ficar igual ao pago, a comanda vira `paid`.
+- `customer_id` (fiado) fica para a spec 06.
 
 ### Eventos (spec 04, seção 7.1; depois do commit)
 
@@ -468,7 +469,7 @@ Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (
 | ------------------------------ | -------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
 | `shift.opened`, `shift.closed` | `EventShiftOpened`, `EventShiftClosed` | `unit`                                                               | `Shift`; versão do turno                                                  |
 | `shift.updated` (proposta)     | `EventShiftUpdated`                    | `unit`                                                               | `Shift` com a tabela de preços nova                                       |
-| `tab.created`, `tab.updated`   | `EventTabCreated`, `EventTabUpdated`   | `unit`                                                               | `TabSummary` com totais; versão da comanda                                |
+| `tab.created`, `tab.updated`   | `EventTabCreated`, `EventTabUpdated`   | `unit`                                                               | `TabSummary` com totais, saldo e contadores; versão da comanda            |
 | `order.created`                | `EventOrderCreated`                    | `unit` (pedido completo) e `station` de cada item (só os itens dela) | `Order`; versão do pedido                                                 |
 | `order_item.stage_changed`     | `EventOrderItemStageChanged`           | `unit`, `station` de origem e de destino                             | `{ item, previousStageId, previousStationId, remaining }`; versão do item |
 | `order_item.canceled`          | `EventOrderItemCanceled`               | `unit` e `station` em que estava                                     | `{ item, previousStationId, remaining }`; versão do item                  |
@@ -476,6 +477,7 @@ Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (
 
 - Mudança de etapa e cancelamento saem num único envio para a sala da unidade e as das estações: um aparelho em várias delas recebe o evento uma vez. `order.created` tem payloads diferentes por sala; um aparelho na unidade e numa estação recebe os dois (o app junta pelo `id`).
 - Divisão de quantidade: `item` é a linha nova; `remaining`, a original com o restante (o app atualiza as duas). Item que muda de estação sai da fila de origem (`previousStationId`) e entra na de destino (`item.stationId`).
+- **Contadores do varal em tempo real (ajuste da fase 5):** uma mudança de etapa que altera `readyItemCount` (o item entra ou sai da etapa anterior à final) ou `lateItemCount` (item atrasado chega à etapa final) incrementa a `version` da comanda e emite `tab.updated` com totais e contadores. Mudanças que não mexem nos contadores (ex.: Recebido → Preparando) não emitem nada além de `order_item.stage_changed`. O atraso que surge só com o passar do tempo continua calculado no app a partir de `lateAt`.
 - **Reconexão (RN-01.05, CA-04.12):** o app busca `GET /stations/{id}/queue` ou `GET /shifts/{id}/tabs` e depois aplica os eventos, ignorando os de versão menor ou igual à que já tem.
 
 ### Testar à mão
@@ -484,6 +486,65 @@ Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (
 pnpm db:seed   # turno aberto de exemplo na Barraca da Praça, com 3 comandas
 # dono: veja o login com curl na seção Seed; IDs em GET /units, /units/{id}/shifts/current e /units/{id}/menu
 curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' http://localhost:3000/api/v1/units/<unitId>/shifts/current
+```
+
+## Fechamento e caixa (spec 05)
+
+Também em [`src/operation`](src/operation) (`PaymentsService`, `CashRegistersService`, `CashController`, regras puras em `payment-rules.ts`). Mesmas regras de sessão, 404/403 e `Idempotency-Key` em toda escrita; erros novos no enum `OperationErrorCode`.
+
+| Rota                                  | O quê                                                                                            | Quem                                             |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------ |
+| `PUT /tabs/{id}/discount`             | Desconto `amount` (centavos) ou `percent` (1 a 100), `reason`; substitui o anterior              | balcão (RN-05.02)                                |
+| `DELETE /tabs/{id}/discount`          | Remove, com `reason`                                                                             | balcão                                           |
+| `POST /tabs/{id}/payments`            | `method`, `amountCents` (Pix/cartões) ou `tenderedCents` (dinheiro), `cashRegisterId`, `version` | balcão (RN-05.05)                                |
+| `POST /payments/{id}/reverse`         | Estorno com `reason`                                                                             | balcão                                           |
+| `POST /shifts/{id}/tabs/pay-first`    | `customerName`, `items`, `payments[]`, `cashRegisterId`: comanda + pedido + pagamentos           | balcão                                           |
+| `POST /shifts/{id}/cash-registers`    | Abre caixa: `name` (padrão "Caixa N"), `openingFloatCents`                                       | dono ou `canOperateCash` (RN-05.16)              |
+| `GET /shifts/{id}/cash-registers`     | Caixas do turno com `expected` por forma e `cash` (composição do dinheiro)                       | dono, `canOperateCash` ou balcão (para escolher) |
+| `GET /cash-registers/{id}`            | Detalhe com movimentos e pagamentos                                                              | dono ou `canOperateCash`                         |
+| `POST /cash-registers/{id}/movements` | `withdrawal` (sangria) ou `deposit` (suprimento), `amountCents`, `reason`, `version`             | dono ou `canOperateCash`                         |
+| `POST /cash-registers/{id}/close`     | `counts` (as 4 formas, uma vez cada), `note`, `version`                                          | dono ou `canOperateCash`                         |
+
+### Decisões
+
+- **Saldo:** `TabSummary` ganhou `paidCents` (pagamentos não estornados), `balanceCents` (total − pago) e `discountReason`; `Tab` ganhou `payments` (inclusive estornados). Só acréscimos no contrato.
+- **Concorrência de pagamento:** toda escrita da spec 05 trava a linha da comanda (`FOR UPDATE`) antes de ler o saldo, e depois a do caixa (ordem comanda → caixa; movimentos e fechamento travam só o caixa). Dois aparelhos pagando juntos rodam em fila: o segundo vê o saldo novo e recebe `PAYMENT_EXCEEDS_BALANCE`/`TAB_NOTHING_TO_PAY` (ou, no dinheiro, aplica só o que falta, com o troco certo). `version` da comanda é opcional (`TAB_CHANGED`) para o app que quer recusar se a tela estava velha. Desconto, pagamento e estorno incrementam a `version` da comanda; pagamento, estorno e movimento incrementam a do caixa.
+- **Qual caixa recebe (RN-05.05, RN-05.06):** `cashRegisterId` opcional; sem ele, o único caixa aberto do turno; com mais de um, `409 CASH_REGISTER_REQUIRED` com `details.cashRegisters` (`{ id, name }`); nenhum aberto, `NO_CASH_REGISTER_OPEN` ("Abra um caixa para receber", CA-05.08). Caixa de outro turno: `400 INVALID_CASH_REGISTER`; fechado: `CASH_REGISTER_CLOSED`. Qualquer colaborador com balcão recebe em qualquer caixa aberto; abrir, movimentar e fechar caixa é de quem opera caixa.
+- **Dinheiro (RN-05.09):** aplicado = mín(entregue, saldo), troco = entregue − aplicado; o banco confere `tendered = amount + change` e que só dinheiro tem esses campos.
+- **Desconto (RN-05.01 a 05.03):** `percent` arredondado para baixo sobre o subtotal do momento; `amount` maior que o subtotal zera o total (nunca negativo). Recusado se deixar o total abaixo do já pago (`TAB_PAYMENTS_EXCEED_TOTAL`); se deixar o saldo em zero com pagamento, a comanda vira `paid`. Comanda `paid` não muda (`TAB_PAID`).
+- **Estorno (RN-05.13 a 05.15):** marca `reversed_at`, quem e o motivo; turno e caixa do pagamento abertos. Comanda `paid` volta a `closing` (`closed_at` limpo). O valor sai do esperado do caixa.
+- **Paga antes (RN-05.12, CA-04.10, CA-05.09):** uma transação cria a comanda já `paid`, o pedido (mesmas validações do pedido normal) e os pagamentos, aplicados na ordem enviada, num único caixa. Se a soma não cobre o total, `409 PAYMENT_INSUFFICIENT` e nada fica gravado (nem o número da comanda é consumido). `tab.created` e `order.created` só saem depois do commit: nenhum item chega à cozinha sem o pagamento registrado.
+- **Caixas (RN-05.16 a 05.21):** nome único por turno (sem diferenciar maiúsculas), fundo ≥ 0, vários abertos. Abrir trava o turno (a mesma trava do fechamento do turno). Sangria até o dinheiro esperado (`WITHDRAWAL_EXCEEDS_CASH`). Fechar exige o valor conferido das 4 formas (crédito e débito separados); `cash_register_counts` guarda esperado, informado e diferença; diferença ≠ 0 sem `note` → `400 CLOSING_NOTE_REQUIRED` com `details.counts` (prévia das diferenças). Caixa fechado não reabre.
+- **Quitação de fiado (spec 06):** `payments.is_credit_settlement` já existe (sempre `false` por enquanto); a separação na conferência (RN-05.22) entra com a spec 06.
+- **Auditoria:** `tab.discount_applied|discount_removed|paid`, `payment.received|reversed`, `cash_register.opened|withdrawal|deposit|closed`.
+
+### Eventos (sala `unit`, depois do commit)
+
+| Evento                  | Schema                     | Quando                                                       |
+| ----------------------- | -------------------------- | ------------------------------------------------------------ |
+| `tab.updated`           | `EventTabUpdated`          | Desconto, pagamento, estorno (e `tab.created` no paga antes) |
+| `cash_register.opened`  | `EventCashRegisterOpened`  | Caixa aberto                                                 |
+| `cash_register.updated` | `EventCashRegisterUpdated` | Pagamento, estorno, sangria ou suprimento                    |
+| `cash_register.closed`  | `EventCashRegisterClosed`  | Caixa fechado, com `counts`                                  |
+
+`data` é o `CashRegister` (com o esperado); `version` é a do caixa.
+
+### Ajustes pedidos pelo painel (fase 5)
+
+- **Fluxo para o balcão:** `GET /units/{id}/workflow` passou a aceitar dono **e colaboradores da unidade** (403 para quem não tem acesso a ela, 404 para outra organização); `PUT` continua só do dono. Mesmo contrato (`Workflow`), só a permissão de leitura foi ampliada.
+- **Contadores do varal:** `tab.updated` na mudança de etapa que altera `readyItemCount`/`lateItemCount` (seção de eventos da spec 04 acima).
+
+### Métricas do admin
+
+`MetricsService` preenche turnos fechados (total e por semana), organizações com turno aberto no período, comandas `paid`/`on_credit`/`settled` (por `closed_at`), valor vendido (total das comandas, calculado em SQL dos itens copiados e do desconto, como RN-04.14/RN-05.03) e ticket médio.
+
+### Testar à mão
+
+```bash
+pnpm db:seed   # o turno de exemplo ganha o "Caixa 1" (fundo R$ 100), um Pix parcial na "Mesa da família" e a comanda paga antes "Lucas"
+# IDs: GET /units/<unitId>/shifts/current e GET /shifts/<shiftId>/cash-registers
+curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'content-type: application/json' \
+  -d '{"method":"pix","amountCents":1000}' http://localhost:3000/api/v1/tabs/<tabId>/payments
 ```
 
 ## Imagem

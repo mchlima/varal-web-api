@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import { defineRealtimeEvent } from '../realtime/realtime.contracts.js';
 import { RealtimeService } from '../realtime/realtime.service.js';
+import { type CashRegisterDto, CashRegisterSchema } from './cash.schemas.js';
 import {
   type OrderDto,
   type OrderItemDto,
@@ -51,7 +52,7 @@ export const TabUpdated = defineRealtimeEvent(
   'EventTabUpdated',
   'tab.updated',
   TabSummarySchema,
-  'Comanda com situação, totais e `version` novos (sala `unit`): pedido novo, item cancelado, pedir a conta, reabrir, cancelar.',
+  'Comanda com situação, totais, saldo, contadores e `version` novos (sala `unit`): pedido novo, item cancelado, pedir a conta, reabrir, cancelar, desconto, pagamento e estorno (spec 05), e mudança de etapa que altere `readyItemCount` ou `lateItemCount`.',
 );
 
 export const OrderCreated = defineRealtimeEvent(
@@ -104,7 +105,31 @@ export const OrderCompleted = defineRealtimeEvent(
   'Todos os itens do pedido estão na etapa final ou cancelados (sala `unit`). `version` é a do pedido.',
 );
 
+export const CashRegisterOpened = defineRealtimeEvent(
+  'EventCashRegisterOpened',
+  'cash_register.opened',
+  CashRegisterSchema,
+  'Caixa aberto no turno (sala `unit`, spec 05). `version` é a do caixa.',
+);
+
+export const CashRegisterUpdated = defineRealtimeEvent(
+  'EventCashRegisterUpdated',
+  'cash_register.updated',
+  CashRegisterSchema,
+  'Esperado do caixa mudou: pagamento, estorno, sangria ou suprimento (sala `unit`, spec 05).',
+);
+
+export const CashRegisterClosed = defineRealtimeEvent(
+  'EventCashRegisterClosed',
+  'cash_register.closed',
+  CashRegisterSchema,
+  'Caixa fechado, com a conferência em `counts` (sala `unit`, spec 05).',
+);
+
 export const operationEventSchemas: readonly z.ZodType[] = [
+  CashRegisterOpened.schema,
+  CashRegisterUpdated.schema,
+  CashRegisterClosed.schema,
   ShiftOpened.schema,
   ShiftClosed.schema,
   ShiftUpdated.schema,
@@ -134,6 +159,17 @@ export class OperationEvents {
 
   tab(event: typeof TabCreated | typeof TabUpdated, tab: TabSummaryDto): void {
     this.realtime.emitToUnit(event, { unitId: tab.unitId, version: tab.version, data: tab });
+  }
+
+  cashRegister(
+    event: typeof CashRegisterOpened | typeof CashRegisterUpdated | typeof CashRegisterClosed,
+    register: CashRegisterDto,
+  ): void {
+    this.realtime.emitToUnit(event, {
+      unitId: register.unitId,
+      version: register.version,
+      data: register,
+    });
   }
 
   /** The whole order to the unit; each station gets only its own items (CA-04.03). */

@@ -149,8 +149,7 @@ export class ShiftsService {
   }
 
   /**
-   * RN-04.07, CA-04.09: refused with the list of pending tabs (and, with spec 05, open cash
-   * registers). RN-04.08: items still in non-final stages go to the final stage, audited.
+   * RN-04.07, CA-04.09: refused with the list of pending tabs and open cash registers. RN-04.08: items still in non-final stages go to the final stage, audited.
    * RN-01.01: a suspended organization can still close its open shifts.
    */
   async close(shiftId: string): Promise<ShiftDto> {
@@ -227,8 +226,7 @@ export class ShiftsService {
 
   /**
    * What keeps the shift open (RN-04.07): tabs in `open` or `closing` and cash registers still
-   * open. Cash registers arrive with spec 05: add their query here (`cash_registers` of the shift
-   * with `status = 'open'`); until then the list is empty.
+   * open (spec 05). Registers open under the same shift lock, so none slips in meanwhile.
    */
   async pendingItems(db: TenantDb, shiftId: string): Promise<ShiftPendingItems> {
     const tabs = await db.tab.findMany({
@@ -236,7 +234,12 @@ export class ShiftsService {
       orderBy: { number: 'asc' },
       select: { id: true, number: true, customerName: true, status: true },
     });
-    return { tabs, cashRegisters: [] };
+    const cashRegisters = await db.cashRegister.findMany({
+      where: { shiftId, status: 'open' },
+      orderBy: { id: 'asc' },
+      select: { id: true, name: true },
+    });
+    return { tabs, cashRegisters };
   }
 
   private async requireShift(db: TenantDb, shiftId: string): Promise<Shift> {

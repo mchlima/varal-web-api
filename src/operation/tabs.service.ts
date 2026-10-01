@@ -8,7 +8,7 @@ import type { Shift, Tab } from '../generated/prisma/client.js';
 import type { TabStatus } from '../generated/prisma/enums.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
 import { resolvePrepStationId, stationForStage } from '../units/routing.js';
-import { assertCounter, OperationAccessService } from './operation-access.js';
+import { assertCounter, OperationAccessService, type OperatorAccess } from './operation-access.js';
 import { operationError } from './operation-errors.js';
 import { OperationEvents, TabCreated, TabUpdated } from './operation-events.js';
 import {
@@ -28,7 +28,7 @@ import {
 import { lockRow } from './row-lock.js';
 
 /** RN-04.28: a tab that left `open`/`closing` accepts no change. */
-const CLOSED_STATUSES: readonly TabStatus[] = ['paid', 'on_credit', 'settled', 'canceled'];
+export const CLOSED_STATUSES: readonly TabStatus[] = ['paid', 'on_credit', 'settled', 'canceled'];
 
 /**
  * Tabs and orders (spec 04, sections 4 and 5). Operated from the counter: the owner and staff with
@@ -124,19 +124,29 @@ export class TabsService {
   }
 
   /**
-   * RN-04.12: `open`/`closing` → `canceled` when every item is canceled and no payment was
-   * registered. Payments arrive with spec 05: check them here then.
+   * RN-04.12: `open`/`closing` → `canceled` when every item is canceled and no payment is
+   * registered (reversed ones do not count, RN-05.14): otherwise `TAB_HAS_PAYMENTS`.
    */
   async cancel(
     tabId: string,
     input: { version?: number | undefined; reason?: string | undefined },
   ): Promise<TabDto> {
     return this.prisma.transaction(async (db) => {
+      const found = await requireTab(db, tabId);
+      assertCounter(await this.access.forUnit(db, found.unitId));
+      // Same lock as payments: a payment never lands on a tab being canceled.
+      await lockRow(db, 'tabs', tabId);
       const tab = await requireTab(db, tabId);
-      assertCounter(await this.access.forUnit(db, tab.unitId));
       await assertShiftOpen(db, tab.shiftId);
+      if (tab.status === 'paid') {
+        throw operationError('TAB_PAID', { paymentIds: await activePaymentIds(db, tabId) });
+      }
       if (CLOSED_STATUSES.includes(tab.status)) {
         throw operationError('TAB_CLOSED');
+      }
+      const paymentIds = await activePaymentIds(db, tabId);
+      if (paymentIds.length > 0) {
+        throw operationError('TAB_HAS_PAYMENTS', { paymentIds });
       }
       const active = await db.orderItem.findMany({
         where: { tabId, canceledAt: null },
@@ -187,8 +197,33 @@ export class TabsService {
         // RN-04.13: `closing` refuses new orders until reopened.
         throw operationError('TAB_NOT_OPEN');
       }
+      if (tab.mode === 'pay_first') {
+        // RN-04.11: a single order, sent with its payment (spec 05).
+        throw operationError('TAB_PAY_FIRST');
+      }
+      const now = new Date();
+      const dto = await this.insertOrder(db, tab, access, input.items, now);
+      this.events.orderCreated(dto);
+      this.events.tab(TabUpdated, await loadTabSummary(db, tabId, now));
+      return dto;
+    });
+  }
 
-      const items = input.items.map((item) => ({
+  /**
+   * Validates and writes an order of `tab` (RN-04.16 to RN-04.19), audited. No status check and no
+   * event: the callers do both (`createOrder`, and "paga antes", which sends the order only with
+   * its payment, CA-04.10).
+   */
+  async insertOrder(
+    db: TenantDb,
+    tab: Tab,
+    access: OperatorAccess,
+    requested: CreateOrderRequest['items'],
+    now: Date,
+  ): Promise<OrderDto> {
+    {
+      const tabId = tab.id;
+      const items = requested.map((item) => ({
         ...item,
         productId: item.productId.toLowerCase(),
         modifierIds: item.modifierIds.map((id) => id.toLowerCase()),
@@ -211,7 +246,6 @@ export class TabsService {
         ]),
       );
       const numberInTab = (await db.order.count({ where: { tabId } })) + 1;
-      const now = new Date();
       const organizationId = requireOrganizationId();
       const order = await db.order.create({
         data: {
@@ -285,10 +319,8 @@ export class TabsService {
         },
         metadata: { unitId: tab.unitId, shiftId: tab.shiftId },
       });
-      this.events.orderCreated(dto);
-      this.events.tab(TabUpdated, await loadTabSummary(db, tabId, now));
       return dto;
-    });
+    }
   }
 
   private async transition(
@@ -310,6 +342,10 @@ export class TabsService {
       }
       if (tab.status !== rule.from) {
         throw operationError(rule.wrongStatus);
+      }
+      if (rule.to === 'open' && tab.mode === 'pay_first') {
+        // RN-04.11: a "paga antes" tab never takes another order.
+        throw operationError('TAB_PAY_FIRST');
       }
       await updateWithVersion<Tab>(db.tab, {
         where: { id: tabId },
@@ -396,6 +432,16 @@ export async function requireTab(db: TenantDb, tabId: string): Promise<Tab> {
     throw AppError.of('NOT_FOUND');
   }
   return tab;
+}
+
+/** Payments of the tab not reversed (RN-05.07). */
+export async function activePaymentIds(db: TenantDb, tabId: string): Promise<string[]> {
+  const rows = await db.payment.findMany({
+    where: { tabId, reversedAt: null },
+    orderBy: { id: 'asc' },
+    select: { id: true },
+  });
+  return rows.map((row) => row.id);
 }
 
 /** RN-04.08: nothing changes in a closed shift. */
