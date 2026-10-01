@@ -263,6 +263,7 @@ model Organization {
   cashMovements         CashMovement[]
   cashRegisterCounts    CashRegisterCount[]
   payments              Payment[]
+  customers             Customer[]
 
   @@map("organizations")
 }
@@ -292,6 +293,7 @@ model Unit {
   tabs                 Tab[]
   orderItems           OrderItem[]
   cashRegisters        CashRegister[]
+  customers            Customer[]
 
   @@unique([organizationId, name])
   /// Target of composite foreign keys that keep child rows in the same organization.
@@ -609,9 +611,10 @@ model ShiftPrice {
 }
 
 /// A tab (comanda, spec 04, section 4). Never deleted: canceled (RN-04.12).
-/// `customer_id` (fiado) arrives with spec 06; the discount is applied by spec 05.
+/// `customer_id`, `credit_at` and `settled_at`: fiado (spec 06); the discount is applied by spec 05.
 /// SQL-only: CHECK char_length(customer_name) BETWEEN 1 AND 40; CHECK number >= 1;
-/// CHECK discount_value >= 0; CHECK (discount_type IS NULL) = (discount_value IS NULL).
+/// CHECK discount_value >= 0; CHECK (discount_type IS NULL) = (discount_value IS NULL);
+/// CHECK on_credit/settled have customer_id and credit_at; CHECK (status = 'settled') = (settled_at IS NOT NULL).
 model Tab {
   id             String        @id @default(uuid(7)) @db.Uuid
   organizationId String        @map("organization_id") @db.Uuid
@@ -629,6 +632,12 @@ model Tab {
   openedById     String?       @map("opened_by_id") @db.Uuid
   /// When it left `open`/`closing` for good (paid, on credit, canceled).
   closedAt       DateTime?     @map("closed_at") @db.Timestamptz(3)
+  /// Customer of a tab on credit (RN-06.05), kept after settling and after the customer is removed.
+  customerId     String?       @map("customer_id") @db.Uuid
+  /// When it was put on credit (spec 06, section 6).
+  creditAt       DateTime?     @map("credit_at") @db.Timestamptz(3)
+  /// When the balance of a tab on credit reached zero (RN-06.10).
+  settledAt      DateTime?     @map("settled_at") @db.Timestamptz(3)
   /// Concurrency and version of `tab.*` events: incremented on status, orders and totals changes.
   version        Int           @default(0)
   createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -637,6 +646,7 @@ model Tab {
   organization Organization @relation(fields: [organizationId], references: [id])
   shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
   unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  customer     Customer?    @relation(fields: [organizationId, customerId], references: [organizationId, id])
   orders       Order[]
   items        OrderItem[]
   payments     Payment[]
@@ -644,6 +654,8 @@ model Tab {
   @@unique([shiftId, number])
   @@unique([organizationId, id])
   @@index([organizationId, shiftId, status])
+  @@index([organizationId, unitId, status])
+  @@index([organizationId, customerId])
   @@map("tabs")
 }
 
@@ -1190,4 +1202,35 @@ model ImpersonationSession {
   @@index([platformAdminId])
   @@index([expiresAt])
   @@map("impersonation_sessions")
+}
+
+/// A customer of the fiado (spec 06, section 3), per unit (RN-06.01). Only the name is required;
+/// phone, CPF, reference and note tell apart customers with the same name. Removing at the
+/// customer's request (LGPD, RN-06.03) anonymizes the row and keeps its tabs.
+/// SQL-only: CHECK name 1..60 characters; CHECK phone 10 or 11 digits; CHECK cpf 11 digits;
+/// CHECK reference <= 60 and note <= 140 characters; CHECK an anonymized row has no personal data;
+/// unique (unit_id, phone) and (unit_id, cpf) among the rows not anonymized (RN-06.02).
+model Customer {
+  id             String    @id @default(uuid(7)) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  unitId         String    @map("unit_id") @db.Uuid
+  name           String
+  /// Digits only, with the area code (DDD).
+  phone          String?
+  /// Digits only, valid check digits.
+  cpf            String?
+  reference      String?
+  note           String?
+  anonymizedAt   DateTime? @map("anonymized_at") @db.Timestamptz(3)
+  version        Int       @default(0)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  tabs         Tab[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, unitId])
+  @@map("customers")
 }

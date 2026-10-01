@@ -218,6 +218,7 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
 
     await seedShift(tx, { organizationId, unitId: unit.id, ownerId: owner.id });
     await seedCash(tx, { organizationId, unitId: unit.id, cashierId: staffMemberIds[0] ?? null });
+    await seedCredit(tx, { organizationId, unitId: unit.id, cashierId: staffMemberIds[0] ?? null });
 
     const platformAdmin = await tx.platformAdmin.upsert({
       where: { email: SEED.platformAdmin.email },
@@ -687,6 +688,104 @@ async function seedCash(
   await payment(tab.id, 'cash', total, Math.max(total, SEED_PAY_FIRST.tenderedCents));
 }
 
+/** Spec 06: example customers (one with phone, one with only name and reference). */
+export const SEED_CUSTOMERS = [
+  { name: 'Seu Zé', phone: '11987654321', reference: null },
+  { name: 'Dona Cida', phone: null, reference: 'Barraca do lado' },
+] as const;
+
+/** Spec 06: a tab of the open shift put on credit for "Dona Cida". */
+export const SEED_ON_CREDIT = {
+  customerName: 'Dona Cida',
+  product: 'Refrigerante lata',
+  quantity: 3,
+} as const;
+
+/**
+ * Spec 06 (created while the unit has no customer): two customers and a tab on credit in the open
+ * shift, with its drinks delivered, to receive later in any shift.
+ */
+async function seedCredit(
+  tx: Prisma.TransactionClient,
+  scope: { organizationId: string; unitId: string; cashierId: string | null },
+): Promise<void> {
+  const { organizationId, unitId, cashierId } = scope;
+  if ((await tx.customer.count({ where: { organizationId, unitId } })) > 0) {
+    return;
+  }
+  const customers = [];
+  for (const customer of SEED_CUSTOMERS) {
+    customers.push(await tx.customer.create({ data: { organizationId, unitId, ...customer } }));
+  }
+  const customer = customers.find((row) => row.name === SEED_ON_CREDIT.customerName);
+  const shift = await tx.shift.findFirst({ where: { organizationId, unitId, status: 'open' } });
+  const product = await tx.product.findFirst({
+    where: { organizationId, unitId, name: SEED_ON_CREDIT.product },
+    include: { category: true },
+  });
+  const final = await tx.workflowStage.findFirst({
+    where: { organizationId, unitId, archivedAt: null, isFinal: true },
+  });
+  if (!customer || !shift || !product || !final) {
+    return;
+  }
+  const actor =
+    cashierId === null
+      ? { type: 'system' as const, id: null }
+      : { type: 'staff' as const, id: cashierId };
+  const numbered = await tx.shift.update({
+    where: { id: shift.id },
+    data: { nextTabNumber: { increment: 1 } },
+  });
+  const now = new Date();
+  const tab = await tx.tab.create({
+    data: {
+      organizationId,
+      shiftId: shift.id,
+      unitId,
+      number: numbered.nextTabNumber - 1,
+      customerName: SEED_ON_CREDIT.customerName,
+      mode: 'open_tab',
+      status: 'on_credit',
+      customerId: customer.id,
+      creditAt: now,
+      openedByType: actor.type,
+      openedById: actor.id,
+      closedAt: now,
+    },
+  });
+  const order = await tx.order.create({
+    data: {
+      organizationId,
+      tabId: tab.id,
+      shiftId: shift.id,
+      numberInTab: 1,
+      status: 'completed',
+      createdByType: actor.type,
+      createdById: actor.id,
+      sentAt: now,
+      completedAt: now,
+    },
+  });
+  await tx.orderItem.create({
+    data: {
+      organizationId,
+      orderId: order.id,
+      tabId: tab.id,
+      unitId,
+      productId: product.id,
+      productName: product.name,
+      unitPriceCents: product.priceCents,
+      quantity: SEED_ON_CREDIT.quantity,
+      position: 0,
+      prepStationId: product.stationId ?? product.category.defaultStationId,
+      stageId: final.id,
+      stationId: null,
+      stageEnteredAt: now,
+    },
+  });
+}
+
 if (import.meta.main) {
   const { loadEnvFiles } = await import('../src/config/load-env.js');
   const { PrismaClient } = await import('../src/generated/prisma/client.js');
@@ -701,7 +800,7 @@ if (import.meta.main) {
     const result = await seed(prisma);
     console.log(
       `Seed ok: organização ${SEED.organization.name} (código ${SEED.organization.accessCode}), ` +
-        `unidade com estações, fluxo, cardápio e um turno aberto de exemplo com um caixa, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
+        `unidade com estações, fluxo, cardápio e um turno aberto de exemplo com um caixa, 2 clientes e uma comanda pendurada, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
         `Senha de desenvolvimento: ${SEED.devPassword}.`,
     );
   } finally {

@@ -867,6 +867,12 @@
         "additionalProperties": false,
         "description": "Dinheiro esperado = fundo + pagamentos + suprimentos − sangrias (RN-05.19).",
         "properties": {
+          "creditSettlementsCents": {
+            "description": "Parte de `paymentsCents` que veio de quitações de fiado (RN-05.22).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "depositsCents": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -892,6 +898,7 @@
         "required": [
           "openingFloatCents",
           "paymentsCents",
+          "creditSettlementsCents",
           "depositsCents",
           "withdrawalsCents"
         ],
@@ -1021,6 +1028,12 @@
             },
             "type": "array"
           },
+          "creditSettlementsCents": {
+            "description": "Total de quitações de fiado recebidas neste caixa, em todas as formas (RN-05.22).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "expected": {
             "description": "Esperado por forma, na ordem `cash`, `pix`, `credit_card`, `debit_card` (tabela da seção 5).",
             "items": {
@@ -1084,6 +1097,7 @@
           "expected",
           "cash",
           "counts",
+          "creditSettlementsCents",
           "version"
         ],
         "type": "object"
@@ -1091,6 +1105,12 @@
       "CashRegisterCount": {
         "additionalProperties": false,
         "properties": {
+          "creditSettlementsCents": {
+            "description": "Quitações de fiado recebidas neste caixa (não estornadas), separadas do recebido das comandas do turno (RN-05.22). Já estão somadas no esperado.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "differenceCents": {
             "description": "Informado − esperado (RN-05.20).",
             "maximum": 9007199254740991,
@@ -1115,7 +1135,8 @@
           "method",
           "expectedCents",
           "informedCents",
-          "differenceCents"
+          "differenceCents",
+          "creditSettlementsCents"
         ],
         "type": "object"
       },
@@ -1159,6 +1180,12 @@
               "$ref": "#/components/schemas/CashRegisterCount"
             },
             "type": "array"
+          },
+          "creditSettlementsCents": {
+            "description": "Total de quitações de fiado recebidas neste caixa, em todas as formas (RN-05.22).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
           },
           "expected": {
             "description": "Esperado por forma, na ordem `cash`, `pix`, `credit_card`, `debit_card` (tabela da seção 5).",
@@ -1236,6 +1263,7 @@
           "expected",
           "cash",
           "counts",
+          "creditSettlementsCents",
           "version",
           "movements",
           "payments"
@@ -1245,6 +1273,12 @@
       "CashRegisterExpected": {
         "additionalProperties": false,
         "properties": {
+          "creditSettlementsCents": {
+            "description": "Quitações de fiado recebidas neste caixa (não estornadas), separadas do recebido das comandas do turno (RN-05.22). Já estão somadas no esperado.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "expectedCents": {
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
@@ -1252,11 +1286,19 @@
           },
           "method": {
             "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "salesCents": {
+            "description": "Pagamentos das comandas do turno nesta forma (sem quitações de fiado, sem fundo e movimentos).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
           }
         },
         "required": [
           "method",
-          "expectedCents"
+          "expectedCents",
+          "salesCents",
+          "creditSettlementsCents"
         ],
         "type": "object"
       },
@@ -1527,6 +1569,69 @@
         },
         "required": [
           "unitId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateCustomerRequestInput": {
+        "description": "Cadastro (também o rápido, no pendurar): só o nome é obrigatório (CA-06.06).",
+        "properties": {
+          "cpf": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPF validado pelos dígitos verificadores, guardado só com dígitos; único na unidade (RN-06.02)."
+          },
+          "name": {
+            "description": "Obrigatório, até 60 caracteres.",
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 140,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observação, até 140 caracteres (RN-06.01)."
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Telefone com DDD; pontuação é ignorada e fica guardado só com dígitos. Único na unidade (RN-06.02)."
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Até 60 caracteres (RN-06.01)."
+          }
+        },
+        "required": [
           "name"
         ],
         "type": "object"
@@ -1986,6 +2091,241 @@
         },
         "required": [
           "shift"
+        ],
+        "type": "object"
+      },
+      "Customer": {
+        "additionalProperties": false,
+        "description": "Cliente do fiado, por unidade (RN-06.01). Na busca, aparece com os dados de identificação que tiver, para não confundir homônimos (RN-06.02).",
+        "properties": {
+          "cpf": {
+            "description": "Só dígitos (RN-06.01).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "description": "\"Cliente removido\" depois da remoção (RN-06.03).",
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "description": "Só dígitos, com DDD (RN-06.01).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reference": {
+            "description": "Referência para diferenciar homônimos (ex.: \"apto 42, bloco B\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Removido a pedido (LGPD): nome e dados apagados, comandas mantidas (RN-06.03)."
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "name",
+          "phone",
+          "cpf",
+          "reference",
+          "note",
+          "removedAt",
+          "createdAt",
+          "version"
+        ],
+        "type": "object"
+      },
+      "CustomerDetail": {
+        "additionalProperties": false,
+        "description": "Cliente com o fiado e o histórico de quitações.",
+        "properties": {
+          "balanceCents": {
+            "description": "Total a receber do cliente.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "cpf": {
+            "description": "Só dígitos (RN-06.01).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "createdAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "description": "\"Cliente removido\" depois da remoção (RN-06.03).",
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "phone": {
+            "description": "Só dígitos, com DDD (RN-06.01).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reference": {
+            "description": "Referência para diferenciar homônimos (ex.: \"apto 42, bloco B\").",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Removido a pedido (LGPD): nome e dados apagados, comandas mantidas (RN-06.03)."
+          },
+          "settlements": {
+            "description": "Histórico de quitações (`isCreditSettlement`), inclusive estornadas.",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            },
+            "type": "array"
+          },
+          "tabs": {
+            "description": "Comandas penduradas e quitadas do cliente, mais recentes primeiro.",
+            "items": {
+              "$ref": "#/components/schemas/TabSummary"
+            },
+            "type": "array"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "name",
+          "phone",
+          "cpf",
+          "reference",
+          "note",
+          "removedAt",
+          "createdAt",
+          "version",
+          "balanceCents",
+          "tabs",
+          "settlements"
+        ],
+        "type": "object"
+      },
+      "CustomerList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Customer"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CustomerReceivable": {
+        "additionalProperties": false,
+        "properties": {
+          "balanceCents": {
+            "description": "Soma dos saldos das comandas penduradas.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "customer": {
+            "$ref": "#/components/schemas/Customer"
+          },
+          "oldestCreditAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "tabCount": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "customer",
+          "balanceCents",
+          "tabCount",
+          "oldestCreditAt"
         ],
         "type": "object"
       },
@@ -3923,7 +4263,7 @@
         "type": "object"
       },
       "OperationErrorCode": {
-        "description": "Códigos de erro da operação (specs 04 e 05): turno, comandas, pedidos, itens, descontos, pagamentos e caixas. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.",
+        "description": "Códigos de erro da operação (specs 04 a 06): turno, comandas, pedidos, itens, descontos, pagamentos, caixas e fiado. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.",
         "enum": [
           "SHIFT_ALREADY_OPEN",
           "UNIT_INACTIVE",
@@ -3955,7 +4295,15 @@
           "TAB_PAYMENTS_EXCEED_TOTAL",
           "TAB_HAS_PAYMENTS",
           "TAB_PAID",
-          "TAB_PAY_FIRST"
+          "TAB_PAY_FIRST",
+          "CUSTOMER_PHONE_TAKEN",
+          "CUSTOMER_CPF_TAKEN",
+          "CUSTOMER_HAS_RECEIVABLE",
+          "CUSTOMER_REMOVED",
+          "INVALID_CUSTOMER",
+          "CUSTOMER_REQUIRED",
+          "NO_SHIFT_OPEN",
+          "CUSTOMER_CHANGED"
         ],
         "type": "string"
       },
@@ -5582,6 +5930,23 @@
         ],
         "type": "object"
       },
+      "PutOnCreditRequestInput": {
+        "properties": {
+          "customerId": {
+            "description": "Cliente da unidade (RN-06.05). Opcional só no turno contratado `consumption_billed`: sem ele, a comanda vai para o cliente com o nome do contratante, criado se preciso (RN-06.08).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional; `TAB_CHANGED`).",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "PutShiftPricesRequestInput": {
         "properties": {
           "prices": {
@@ -5785,6 +6150,44 @@
         },
         "required": [
           "room"
+        ],
+        "type": "object"
+      },
+      "Receivables": {
+        "additionalProperties": false,
+        "description": "Valores a receber da unidade (spec 06, seção 7).",
+        "properties": {
+          "customers": {
+            "description": "Totais por cliente, maior saldo primeiro.",
+            "items": {
+              "$ref": "#/components/schemas/CustomerReceivable"
+            },
+            "type": "array"
+          },
+          "tabs": {
+            "description": "Comandas `on_credit` da unidade, mais antigas primeiro (`creditAt`), com cliente e saldo (`balanceCents`).",
+            "items": {
+              "$ref": "#/components/schemas/TabSummary"
+            },
+            "type": "array"
+          },
+          "totalCents": {
+            "description": "Total a receber da unidade.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unitId",
+          "totalCents",
+          "tabs",
+          "customers"
         ],
         "type": "object"
       },
@@ -6836,6 +7239,30 @@
               }
             ]
           },
+          "creditAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quando foi pendurada (spec 06)."
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TabCustomer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cliente do fiado (`on_credit`, `settled`; RN-06.05); `null` nas outras."
+          },
           "customerName": {
             "type": "string"
           },
@@ -6932,6 +7359,19 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
+          "settledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quando o saldo pendurado chegou a zero (RN-06.10)."
+          },
           "shiftId": {
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
@@ -6986,6 +7426,9 @@
           "openedBy",
           "closedAt",
           "version",
+          "customer",
+          "creditAt",
+          "settledAt",
           "orders",
           "payments"
         ],
@@ -7000,6 +7443,36 @@
             "type": "integer"
           }
         },
+        "type": "object"
+      },
+      "TabCustomer": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "removed": {
+            "description": "Removido a pedido (RN-06.03).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "reference",
+          "removed"
+        ],
         "type": "object"
       },
       "TabList": {
@@ -7058,6 +7531,30 @@
                 "type": "null"
               }
             ]
+          },
+          "creditAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quando foi pendurada (spec 06)."
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TabCustomer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cliente do fiado (`on_credit`, `settled`; RN-06.05); `null` nas outras."
           },
           "customerName": {
             "type": "string"
@@ -7141,6 +7638,19 @@
             "minimum": -9007199254740991,
             "type": "integer"
           },
+          "settledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quando o saldo pendurado chegou a zero (RN-06.10)."
+          },
           "shiftId": {
             "format": "uuid",
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
@@ -7194,7 +7704,10 @@
           "openedAt",
           "openedBy",
           "closedAt",
-          "version"
+          "version",
+          "customer",
+          "creditAt",
+          "settledAt"
         ],
         "type": "object"
       },
@@ -7338,6 +7851,71 @@
             "description": "Posição na lista (1 é o primeiro).",
             "maximum": 10000,
             "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateCustomerRequestInput": {
+        "description": "Campos ausentes não mudam; `null` ou texto vazio apaga um dado opcional.",
+        "properties": {
+          "cpf": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CPF validado pelos dígitos verificadores, guardado só com dígitos; único na unidade (RN-06.02)."
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 140,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observação, até 140 caracteres (RN-06.01)."
+          },
+          "phone": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Telefone com DDD; pontuação é ignorada e fica guardado só com dígitos. Único na unidade (RN-06.02)."
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "maxLength": 60,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Até 60 caracteres (RN-06.01)."
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
             "type": "integer"
           }
         },
@@ -12284,6 +12862,290 @@
         ]
       }
     },
+    "/api/v1/customers/{id}": {
+      "delete": {
+        "operationId": "CreditController_remove",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono edita e remove clientes."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CUSTOMER_HAS_RECEIVABLE` (`details.balanceCents`) ou `CUSTOMER_REMOVED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Remove o cliente a pedido (LGPD): apaga nome e dados, mantém as comandas; recusado com valor a receber (RN-06.03, CA-06.05)",
+        "tags": [
+          "credit"
+        ]
+      },
+      "get": {
+        "operationId": "CreditController_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerDetail"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cliente com as comandas penduradas e quitadas, o saldo e o histórico de quitações",
+        "tags": [
+          "credit"
+        ]
+      },
+      "patch": {
+        "operationId": "CreditController_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCustomerRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono edita e remove clientes."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CUSTOMER_PHONE_TAKEN` ou `CUSTOMER_CPF_TAKEN` (RN-06.02, CA-06.06), `CUSTOMER_REMOVED` ou `CUSTOMER_CHANGED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Edita cliente (dono); `null` apaga um dado opcional",
+        "tags": [
+          "credit"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "HealthController_check",
@@ -13255,7 +14117,7 @@
             "panelSession": []
           }
         ],
-        "summary": "Estorna um pagamento, com motivo, com turno e caixa abertos; comanda paga volta a `closing` (RN-05.13 a RN-05.15)",
+        "summary": "Estorna um pagamento, com motivo, com turno e caixa abertos; comanda paga volta a `closing` (RN-05.13 a RN-05.15) e quitada volta a `on_credit` (RN-06.12)",
         "tags": [
           "cash"
         ]
@@ -15751,7 +16613,7 @@
                 }
               }
             },
-            "description": "`NO_CASH_REGISTER_OPEN` (CA-05.08), `CASH_REGISTER_REQUIRED` (`details.cashRegisters`), `CASH_REGISTER_CLOSED`, `PAYMENT_EXCEEDS_BALANCE` (CA-05.03), `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`, `TAB_NOT_CLOSING` (RN-05.07) ou `TAB_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+            "description": "`NO_CASH_REGISTER_OPEN` (CA-05.08), `CASH_REGISTER_REQUIRED` (`details.cashRegisters`), `CASH_REGISTER_CLOSED`, `PAYMENT_EXCEEDS_BALANCE` (CA-05.03), `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`, `TAB_NOT_CLOSING` (RN-05.07), `NO_SHIFT_OPEN` (quitação, RN-06.09) ou `TAB_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
           },
           "default": {
             "content": {
@@ -15769,9 +16631,125 @@
             "panelSession": []
           }
         ],
-        "summary": "Registra um pagamento da comanda em `closing`: Pix e cartões até o saldo, dinheiro com troco; com saldo zero a comanda fica `paid` (RN-05.04 a RN-05.10)",
+        "summary": "Registra um pagamento da comanda em `closing`: Pix e cartões até o saldo, dinheiro com troco; com saldo zero a comanda fica `paid` (RN-05.04 a RN-05.10). Em `on_credit` é quitação de fiado, em qualquer turno aberto da unidade, parcial ou total; com saldo zero fica `settled` (RN-06.09 a RN-06.11)",
         "tags": [
           "cash"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/put-on-credit": {
+      "post": {
+        "operationId": "CreditController_putOnCredit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutOnCreditRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_CUSTOMER`, `CUSTOMER_REQUIRED` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_NOT_CLOSING` (CA-06.02), `TAB_CLOSED`, `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Pendura a comanda em `closing` num cliente da unidade: vai a `on_credit` com o saldo (RN-06.04 a RN-06.08, CA-06.01, CA-06.02)",
+        "tags": [
+          "credit"
         ]
       }
     },
@@ -16346,6 +17324,220 @@
         ]
       }
     },
+    "/api/v1/units/{id}/customers": {
+      "get": {
+        "operationId": "CreditController_list",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
+              "maxLength": 60,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação (RN-06.02, CA-06.04)",
+        "tags": [
+          "credit"
+        ]
+      },
+      "post": {
+        "operationId": "CreditController_create",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCustomerRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Customer"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VALIDATION_FAILED` (telefone com DDD, CPF pelos dígitos verificadores)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CUSTOMER_PHONE_TAKEN` ou `CUSTOMER_CPF_TAKEN` (RN-06.02, CA-06.06).\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cadastra cliente na unidade; só o nome é obrigatório, telefone e CPF únicos na unidade (RN-06.01, RN-06.02)",
+        "tags": [
+          "credit"
+        ]
+      }
+    },
     "/api/v1/units/{id}/menu": {
       "get": {
         "operationId": "MenuController_readMenu",
@@ -16419,6 +17611,82 @@
         "summary": "Cardápio completo da unidade (dono e colaboradores da unidade)",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/receivables": {
+      "get": {
+        "operationId": "CreditController_receivables",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Receivables"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão ou operar o caixa da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Valores a receber da unidade: comandas `on_credit` mais antigas primeiro, com cliente, data e saldo, e totais por cliente",
+        "tags": [
+          "credit"
         ]
       }
     },

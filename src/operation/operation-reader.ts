@@ -216,11 +216,34 @@ export async function loadTabSummaries(
   for (const unitId of new Set(tabs.map((tab) => tab.unitId))) {
     flows.set(unitId, await loadUnitFlow(db, unitId));
   }
+  const customerIds = [
+    ...new Set(tabs.flatMap((tab) => (tab.customerId === null ? [] : [tab.customerId]))),
+  ];
+  const customers =
+    customerIds.length === 0
+      ? []
+      : await db.customer.findMany({
+          where: { id: { in: customerIds } },
+          select: { id: true, name: true, reference: true, anonymizedAt: true },
+        });
   return tabs.map((tab) => {
     const flow = flows.get(tab.unitId);
     const lines = items.filter((item) => item.tabId === tab.id);
     const paid = paidCents(payments.filter((payment) => payment.tabId === tab.id));
-    return toTabSummary(tab, lines, flow, paid, now);
+    const customer = customers.find((row) => row.id === tab.customerId);
+    const summary = toTabSummary(tab, lines, flow, paid, now);
+    return {
+      ...summary,
+      customer:
+        customer === undefined
+          ? null
+          : {
+              id: customer.id,
+              name: customer.name,
+              reference: customer.reference,
+              removed: customer.anonymizedAt !== null,
+            },
+    };
   });
 }
 
@@ -268,6 +291,9 @@ function toTabSummary(
     openedBy: actorRef(tab.openedByType, tab.openedById),
     closedAt: tab.closedAt?.toISOString() ?? null,
     version: tab.version,
+    customer: null,
+    creditAt: tab.creditAt?.toISOString() ?? null,
+    settledAt: tab.settledAt?.toISOString() ?? null,
   };
 }
 

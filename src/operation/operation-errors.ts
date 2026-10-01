@@ -160,6 +160,37 @@ export const OPERATION_ERRORS = {
     status: 409,
     message: 'Comanda paga antes não recebe novos pedidos. Abra outra comanda.',
   },
+  /** RN-06.02: phone already used by another customer of the unit. */
+  CUSTOMER_PHONE_TAKEN: {
+    status: 409,
+    message: 'Já existe um cliente com este telefone nesta unidade.',
+  },
+  /** RN-06.02: CPF already used by another customer of the unit. */
+  CUSTOMER_CPF_TAKEN: { status: 409, message: 'Já existe um cliente com este CPF nesta unidade.' },
+  /** RN-06.03, CA-06.05: a customer with a balance to receive is not removed (`details.balanceCents`). */
+  CUSTOMER_HAS_RECEIVABLE: {
+    status: 409,
+    message: 'Este cliente tem valor a receber. Quite as comandas antes de remover o cadastro.',
+  },
+  /** RN-06.03: a removed customer is not edited nor used again. */
+  CUSTOMER_REMOVED: { status: 409, message: 'Este cliente foi removido.' },
+  /** RN-06.05: the customer does not exist in the unit of the tab (or was removed). */
+  INVALID_CUSTOMER: {
+    status: 400,
+    message: 'Escolha um cliente desta unidade para pendurar a comanda.',
+  },
+  /** RN-06.05: putting on credit needs a customer (optional only in `consumption_billed`, RN-06.08). */
+  CUSTOMER_REQUIRED: { status: 400, message: 'Escolha o cliente para pendurar a comanda.' },
+  /** RN-06.09: a settlement needs an open shift in the unit of the tab. */
+  NO_SHIFT_OPEN: {
+    status: 409,
+    message: 'Abra um turno e um caixa nesta unidade para receber o fiado.',
+  },
+  /** Concurrency: the `version` of the customer changed (`details.currentVersion`). */
+  CUSTOMER_CHANGED: {
+    status: 409,
+    message: 'Outro aparelho alterou este cliente. Confira os dados e tente de novo.',
+  },
 } as const satisfies Record<string, { status: number; message: string }>;
 
 export type OperationErrorCode = keyof typeof OPERATION_ERRORS;
@@ -177,5 +208,5 @@ export const OperationErrorCodeSchema = z
   .meta({
     id: 'OperationErrorCode',
     description:
-      'Códigos de erro da operação (specs 04 e 05): turno, comandas, pedidos, itens, descontos, pagamentos e caixas. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.',
+      'Códigos de erro da operação (specs 04 a 06): turno, comandas, pedidos, itens, descontos, pagamentos, caixas e fiado. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.',
   });

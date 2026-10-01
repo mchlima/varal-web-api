@@ -60,6 +60,7 @@ describe('cash register rules (spec 05, section 5)', () => {
     expect(cash).toEqual({
       openingFloatCents: 10_000,
       paymentsCents: 30_000,
+      creditSettlementsCents: 0,
       depositsCents: 5_000,
       withdrawalsCents: 20_000,
     });

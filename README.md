@@ -126,6 +126,8 @@ Filtros de lista estendem o schema (`PaginationQuerySchema.extend({ status: ... 
 
 Turno aberto de exemplo (spec 04, criado só se a unidade nunca teve turno): comandas 1 "Dona Marta" (espetos em Preparando, atrasados, e refrigerantes em Pronto), 2 "Seu João" (kafta em Recebido, frango dividido entre Preparando e Pronto, pão de alho entregue) e 3 "Mesa da família" (em fechamento, tudo entregue). Spec 05 (criado enquanto o turno aberto não tem caixa): "Caixa 1" aberto pela `ana` com R$ 100,00 de fundo, um Pix de metade do total na "Mesa da família" e a comanda 4 "Lucas", paga antes, em dinheiro com troco.
 
+**Spec 06 (criado enquanto a unidade não tem clientes): clientes "Seu Zé" (com telefone) e "Dona Cida" (só nome e referência "Barraca do lado") e uma comanda pendurada da "Dona Cida" no turno aberto (3 refrigerantes, sem pagamento).
+
 **Senha de desenvolvimento `varal12345`** para o dono, os dois colaboradores e o admin. Só existe no seed, que se recusa a rodar com `NODE_ENV=production`; ela é gravada apenas enquanto a senha está vazia, então uma senha trocada localmente sobrevive a um novo seed.
 
 ```bash
@@ -457,11 +459,11 @@ Módulo [`src/operation`](src/operation). Todas as rotas usam a sessão do app (
 ### Integração com a spec 05 (fase 6)
 
 - **Paga antes** (`POST /shifts/{id}/tabs/pay-first`, CA-04.10): ver [Fechamento e caixa](#fechamento-e-caixa-spec-05). Comanda `pay_first` tem um único pedido: não reabre nem recebe outro pedido (`TAB_PAY_FIRST`).
-- `closing` → `paid` automático quando o saldo zera (RN-05.10); pendurar (`on_credit`) entra com a spec 06.
+- `closing` → `paid` automático quando o saldo zera (RN-05.10); pendurar (`on_credit`): ver [Fiado](#fiado-spec-06).
 - **Fechar turno** lista também os caixas abertos em `details.cashRegisters` (RN-04.07).
 - **Cancelar comanda** com pagamento não estornado: `409 TAB_HAS_PAYMENTS` (`details.paymentIds`); comanda `paid`: `TAB_PAID`.
 - **Cancelar item** de comanda `paid` (RN-04.28): `409 TAB_PAID` com `details.paymentIds`; o balcão estorna (a comanda volta a `closing`), cancela o item e recebe de novo (RN-05.14). Em `closing` com pagamento parcial, cancelar item que deixaria o total abaixo do já pago dá `TAB_PAYMENTS_EXCEED_TOTAL`; se o total ficar igual ao pago, a comanda vira `paid`.
-- `customer_id` (fiado) fica para a spec 06.
+- `customer_id`, `credit_at` e `settled_at` (fiado): ver [Fiado](#fiado-spec-06).
 
 ### Eventos (spec 04, seção 7.1; depois do commit)
 
@@ -515,7 +517,7 @@ Também em [`src/operation`](src/operation) (`PaymentsService`, `CashRegistersSe
 - **Estorno (RN-05.13 a 05.15):** marca `reversed_at`, quem e o motivo; turno e caixa do pagamento abertos. Comanda `paid` volta a `closing` (`closed_at` limpo). O valor sai do esperado do caixa.
 - **Paga antes (RN-05.12, CA-04.10, CA-05.09):** uma transação cria a comanda já `paid`, o pedido (mesmas validações do pedido normal) e os pagamentos, aplicados na ordem enviada, num único caixa. Se a soma não cobre o total, `409 PAYMENT_INSUFFICIENT` e nada fica gravado (nem o número da comanda é consumido). `tab.created` e `order.created` só saem depois do commit: nenhum item chega à cozinha sem o pagamento registrado.
 - **Caixas (RN-05.16 a 05.21):** nome único por turno (sem diferenciar maiúsculas), fundo ≥ 0, vários abertos. Abrir trava o turno (a mesma trava do fechamento do turno). Sangria até o dinheiro esperado (`WITHDRAWAL_EXCEEDS_CASH`). Fechar exige o valor conferido das 4 formas (crédito e débito separados); `cash_register_counts` guarda esperado, informado e diferença; diferença ≠ 0 sem `note` → `400 CLOSING_NOTE_REQUIRED` com `details.counts` (prévia das diferenças). Caixa fechado não reabre.
-- **Quitação de fiado (spec 06):** `payments.is_credit_settlement` já existe (sempre `false` por enquanto); a separação na conferência (RN-05.22) entra com a spec 06.
+- **Quitação de fiado (spec 06):** `payments.is_credit_settlement`; a conferência separa as quitações (RN-05.22): ver [Fiado](#fiado-spec-06).
 - **Auditoria:** `tab.discount_applied|discount_removed|paid`, `payment.received|reversed`, `cash_register.opened|withdrawal|deposit|closed`.
 
 ### Eventos (sala `unit`, depois do commit)
@@ -545,6 +547,47 @@ pnpm db:seed   # o turno de exemplo ganha o "Caixa 1" (fundo R$ 100), um Pix par
 # IDs: GET /units/<unitId>/shifts/current e GET /shifts/<shiftId>/cash-registers
 curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'content-type: application/json' \
   -d '{"method":"pix","amountCents":1000}' http://localhost:3000/api/v1/tabs/<tabId>/payments
+```
+
+## Fiado (spec 06)
+
+Também em [`src/operation`](src/operation) (`CreditService`, `CreditController`, regras puras em `credit-rules.ts`; a quitação fica no `PaymentsService`). Mesmas regras de sessão, 404/403 e `Idempotency-Key` em toda escrita; erros novos no enum `OperationErrorCode`.
+
+| Rota                                  | O quê                                                                                   | Quem                         |
+| ------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------- |
+| `GET /units/{id}/customers?q=&limit=` | Busca por nome, telefone, CPF ou referência (sem os removidos), em ordem de nome        | balcão (inclui o dono)       |
+| `POST /units/{id}/customers`          | Cadastro: `name` obrigatório; `phone`, `cpf`, `reference`, `note` opcionais             | balcão                       |
+| `GET /customers/{id}`                 | Cliente com comandas penduradas e quitadas, saldo e histórico de quitações              | balcão                       |
+| `PATCH /customers/{id}`               | Edição (`null` ou vazio apaga um dado opcional; `version` opcional, `CUSTOMER_CHANGED`) | dono                         |
+| `DELETE /customers/{id}`              | Remoção a pedido (LGPD): anonimiza; recusada com valor a receber                        | dono                         |
+| `POST /tabs/{id}/put-on-credit`       | Pendura a comanda em `closing` (`customerId`, `version` opcional)                       | balcão                       |
+| `GET /units/{id}/receivables`         | Comandas `on_credit` mais antigas primeiro, total e totais por cliente                  | balcão ou quem opera o caixa |
+| `POST /tabs/{id}/payments`            | Em comanda `on_credit` é quitação (mesmo contrato da spec 05)                           | balcão                       |
+
+### Decisões
+
+- **Clientes (RN-06.01, RN-06.02, CA-06.06):** só o nome é obrigatório (até 60). Telefone (DDD + 8 ou 9 dígitos, celular começando com 9) e CPF (dígitos verificadores) chegam com ou sem pontuação e ficam só com dígitos; únicos na unidade entre os não removidos, por índices únicos parciais no banco (`CUSTOMER_PHONE_TAKEN`, `CUSTOMER_CPF_TAKEN`). A busca devolve cada cliente com os dados de identificação; o aviso de homônimo sem identificação é do app (ele busca pelo nome antes de cadastrar).
+- **Remoção (RN-06.03, CA-06.05):** com comanda `on_credit` → `409 CUSTOMER_HAS_RECEIVABLE` (`details.balanceCents`); sem pendência, o nome vira "Cliente removido", telefone, CPF, referência e observação são apagados (`CHECK` no banco) e `anonymized_at` (`removedAt` na API) é preenchido. As comandas continuam com o `customer_id` (aparecem com `customer.removed: true`). Cliente removido não é editado nem recebe comandas (`CUSTOMER_REMOVED`, `INVALID_CUSTOMER`). O `customer_name` da comanda (rótulo digitado no balcão, spec 04) não é alterado.
+- **Auditoria sem dado pessoal:** `customer.created|updated|anonymized` guardam só quais dados estão preenchidos (`hasPhone`, `hasCpf`…), nunca nome, telefone, CPF, referência ou observação, porque o log é só de inserção e o cliente removido não pode continuar nele.
+- **Pendurar (RN-06.04 a RN-06.07, CA-06.01, CA-06.02):** só `closing` (`TAB_NOT_CLOSING` em `open`), com saldo maior que zero, no turno aberto; cliente da mesma unidade (`INVALID_CUSTOMER`; FK composta `(organization_id, unit_id, customer_id)` no banco). A comanda guarda `customer_id`, `credit_at` e `closed_at` (é quando sai do varal e conta nas métricas) e passa a `on_credit`; pagamentos anteriores continuam valendo e o pendurado é o saldo. Pedidos, descontos e cancelamentos de item já recusavam `on_credit` (`TAB_CLOSED`).
+- **Turno contratado `consumption_billed` (RN-06.08):** sem `customerId`, a comanda vai para o cliente com o nome do contratante e referência "Contratante de turno" (criado na primeira vez, reaproveitado depois). Nos outros turnos, sem cliente: `400 CUSTOMER_REQUIRED`.
+- **Quitação (RN-06.09 a RN-06.11, CA-06.03):** `POST /tabs/{id}/payments` em `on_credit` não exige o turno da comanda aberto: exige um turno aberto na unidade (`NO_SHIFT_OPEN`) e um caixa aberto desse turno (mesma escolha de caixa da spec 05). O pagamento grava o turno e o caixa em que entrou e `is_credit_settlement = true`; pode ser parcial (Pix/cartão até o saldo, dinheiro com troco). Saldo zero → `settled` com `settled_at` (`tab.settled` na auditoria).
+- **Estorno (RN-06.12):** segue a spec 05 (turno e caixa do pagamento abertos); comanda `settled` volta a `on_credit` (`settled_at` limpo). Em comanda `on_credit`/`settled` só quitações são estornadas: os pagamentos de antes de pendurar ficam (`TAB_CLOSED`).
+- **Conferência (RN-05.22):** só acréscimos no contrato do caixa: `expected[]` ganhou `salesCents` (comandas do turno) e `creditSettlementsCents` (quitações), o `cash` ganhou `creditSettlementsCents` (parte de `paymentsCents`), cada `counts[]` ganhou `creditSettlementsCents` e o caixa ganhou o total `creditSettlementsCents`. O esperado continua somando tudo o que entrou no caixa.
+- **Métricas (spec 02, seção 6):** comandas `on_credit` e `settled` já contavam por `closed_at`; como pendurar preenche `closed_at`, a comanda conta uma vez, no período em que foi pendurada.
+- **Auditoria:** `customer.created|updated|anonymized`, `tab.put_on_credit`, `tab.settled`; `payment.received|reversed` com `isCreditSettlement`.
+
+### Eventos (sala `unit`, depois do commit)
+
+`tab.updated` ao pendurar e a cada quitação ou estorno de quitação (e `cash_register.updated` no caixa que recebeu). `TabSummary` ganhou `customer` (`{ id, name, reference, removed }`, sem telefone e CPF, porque o evento chega a todos os aparelhos da unidade), `creditAt` e `settledAt`.
+
+### Testar à mão
+
+```bash
+pnpm db:seed   # clientes "Seu Zé" e "Dona Cida" e uma comanda pendurada da "Dona Cida"
+curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' http://localhost:3000/api/v1/units/<unitId>/receivables
+curl -b jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'content-type: application/json' \
+  -d '{"customerId":"<customerId>"}' http://localhost:3000/api/v1/tabs/<tabId>/put-on-credit
 ```
 
 ## Imagem

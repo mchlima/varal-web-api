@@ -41,14 +41,21 @@ export async function loadCashRegister(db: TenantDb, id: string): Promise<CashRe
     where: { id },
     include: {
       movements: { select: { type: true, amountCents: true } },
-      payments: { select: { method: true, amountCents: true, reversedAt: true } },
+      payments: {
+        select: { method: true, amountCents: true, reversedAt: true, isCreditSettlement: true },
+      },
       counts: true,
     },
   });
   if (!register) {
     throw AppError.of('NOT_FOUND');
   }
-  const { expected, cash } = expectedOf(register, register.payments, register.movements);
+  const { expected, cash, creditSettlements } = expectedOf(
+    register,
+    register.payments,
+    register.movements,
+  );
+  const sales = expectedOf({ openingFloatCents: 0 }, register.payments, []);
   const order = (method: PaymentMethod) => PAYMENT_METHODS.indexOf(method);
   return {
     id: register.id,
@@ -63,7 +70,12 @@ export async function loadCashRegister(db: TenantDb, id: string): Promise<CashRe
       register.closedByType === null ? null : actorRef(register.closedByType, register.closedById),
     closedAt: register.closedAt?.toISOString() ?? null,
     closingNote: register.closingNote,
-    expected: PAYMENT_METHODS.map((method) => ({ method, expectedCents: expected[method] })),
+    expected: PAYMENT_METHODS.map((method) => ({
+      method,
+      expectedCents: expected[method],
+      salesCents: sales.expected[method] - creditSettlements[method],
+      creditSettlementsCents: creditSettlements[method],
+    })),
     cash,
     counts: [...register.counts]
       .sort((a, b) => order(a.method) - order(b.method))
@@ -72,7 +84,12 @@ export async function loadCashRegister(db: TenantDb, id: string): Promise<CashRe
         expectedCents: count.expectedCents,
         informedCents: count.informedCents,
         differenceCents: count.differenceCents,
+        creditSettlementsCents: creditSettlements[count.method],
       })),
+    creditSettlementsCents: PAYMENT_METHODS.reduce(
+      (sum, method) => sum + creditSettlements[method],
+      0,
+    ),
     version: register.version,
   };
 }

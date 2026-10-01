@@ -3,7 +3,15 @@ import { afterAll, describe, expect, inject, it } from 'vitest';
 import { verifyPassword } from '../../src/auth/password-hasher.js';
 import type { Env } from '../../src/config/env.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { SEED, SEED_MENU, SEED_PAY_FIRST, SEED_TABS, seed } from '../../scripts/seed.js';
+import {
+  SEED,
+  SEED_CUSTOMERS,
+  SEED_MENU,
+  SEED_ON_CREDIT,
+  SEED_PAY_FIRST,
+  SEED_TABS,
+  seed,
+} from '../../scripts/seed.js';
 
 const databaseUrl = inject('databaseUrl');
 
@@ -91,9 +99,10 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     const result = await seed(platform);
     const shifts = await platform.shift.findMany({ where: { unitId: result.unitId } });
     expect(shifts).toHaveLength(1);
-    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 2 });
+    // Plus the "paga antes" tab (spec 05) and the tab on credit (spec 06).
+    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 3 });
     const tabs = await platform.tab.findMany({
-      where: { shiftId: shifts[0]?.id, mode: 'open_tab' },
+      where: { shiftId: shifts[0]?.id, mode: 'open_tab', status: { not: 'on_credit' } },
       orderBy: { number: 'asc' },
       include: { items: { include: { stage: true } } },
     });
@@ -107,6 +116,27 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     for (const item of tabs.flatMap((tab) => tab.items)) {
       expect(item.stationId === null).toBe(item.stage.isFinal);
     }
+  });
+
+  it('spec 06: two customers (one with phone, one with name and reference) and a tab on credit', async () => {
+    const result = await seed(platform);
+    const customers = await platform.customer.findMany({
+      where: { unitId: result.unitId },
+      orderBy: { id: 'asc' },
+    });
+    expect(customers.map((row) => [row.name, row.phone, row.cpf, row.reference])).toEqual(
+      SEED_CUSTOMERS.map((row) => [row.name, row.phone, null, row.reference]),
+    );
+    const tabs = await platform.tab.findMany({
+      where: { unitId: result.unitId, status: 'on_credit' },
+      include: { customer: true, items: true, payments: true },
+    });
+    expect(tabs).toHaveLength(1);
+    expect(tabs[0]).toMatchObject({ customerName: SEED_ON_CREDIT.customerName });
+    expect(tabs[0]?.customer?.reference).toBe('Barraca do lado');
+    expect(tabs[0]?.creditAt).not.toBeNull();
+    expect(tabs[0]?.items.map((item) => item.quantity)).toEqual([SEED_ON_CREDIT.quantity]);
+    expect(tabs[0]?.payments).toEqual([]);
   });
 
   it('spec 05: an open cash register with a partial Pix and a "paga antes" tab paid in cash', async () => {
@@ -195,6 +225,7 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
         platform.orderItemModifier.count(),
         platform.cashRegister.count(),
         platform.payment.count(),
+        platform.customer.count(),
       ]);
     const first = await seed(platform);
     const before = await counts();
