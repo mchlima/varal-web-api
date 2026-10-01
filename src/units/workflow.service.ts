@@ -10,6 +10,7 @@ import { OpenShiftChecker } from './open-shift.js';
 import { setupError } from './setup-errors.js';
 import { SetupEvents } from './setup-events.js';
 import { requireUnit } from './stations.service.js';
+import { UnitAccessService } from './unit-access.js';
 import { toWorkflowStageDto, type WorkflowDto } from './units.schemas.js';
 import { validateWorkflow } from './workflow-rules.js';
 
@@ -38,10 +39,15 @@ export class WorkflowService {
     private readonly audit: AuditService,
     private readonly shifts: OpenShiftChecker,
     private readonly events: SetupEvents,
+    private readonly units: UnitAccessService,
   ) {}
 
+  /**
+   * Read by the owner and by the staff of the unit (the counter and the stations show the stages;
+   * phase 5 adjustment). Writing stays with the owner (`PUT`).
+   */
   async get(unitId: string): Promise<WorkflowDto> {
-    const unit = await requireUnit(this.prisma.db, unitId);
+    const { unit } = await this.units.forMember(unitId);
     return this.read(this.prisma.db, unit);
   }
 
