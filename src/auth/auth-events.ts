@@ -15,6 +15,8 @@ export const SESSION_REVOCATION_REASONS = [
   'refresh_token_reused',
   'new_login_on_device',
   'staff_deactivated',
+  /** The owner removed every unit of the staff member (RN-03.16: without a unit there is no login). */
+  'staff_access_removed',
   'subject_deactivated',
 ] as const;
 

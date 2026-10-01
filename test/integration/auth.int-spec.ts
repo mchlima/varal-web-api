@@ -16,6 +16,7 @@ import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.
 import {
   createPlatformAdmin,
   credentialsOf,
+  grantUnit,
   loginAdmin,
   loginOwner,
   loginStaff,
@@ -37,6 +38,7 @@ const databaseUrl = inject('databaseUrl');
 const API = '/api/v1';
 /** Stations arrive with spec 03; `station_ids` has no foreign key yet. */
 const STATION_ID = '01922f2c-7a3b-7c00-8000-0000000000e1';
+const STATION_ID_B = '01922f2c-7a3b-7c00-8000-0000000000e2';
 
 describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
   let app: NestExpressApplication;
@@ -61,13 +63,26 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
     await setPassword(platform, { owner: tenantA.ownerId, staff: tenantA.staffMemberId });
     await setPassword(platform, { owner: tenantB.ownerId, staff: tenantB.staffMemberId });
     // Staff of A and B work in their unit, with one station released.
-    for (const tenant of [tenantA, tenantB]) {
+    for (const [tenant, stationId] of [
+      [tenantA, STATION_ID],
+      [tenantB, STATION_ID_B],
+    ] as const) {
+      await platform.station.create({
+        data: {
+          id: stationId,
+          organizationId: tenant.organizationId,
+          unitId: tenant.unitId,
+          name: 'Cozinha',
+          kind: 'queue',
+          sortOrder: 1,
+        },
+      });
       await platform.staffUnitPermission.create({
         data: {
           organizationId: tenant.organizationId,
           staffMemberId: tenant.staffMemberId,
           unitId: tenant.unitId,
-          stationIds: [STATION_ID],
+          stationIds: [stationId],
         },
       });
     }
@@ -177,7 +192,15 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
       expect(body).toMatchObject({
         subject: { type: 'staff', id: tenantA.staffMemberId, username: a.username },
         organization: { id: tenantA.organizationId, accessCode: a.accessCode },
-        units: [{ id: tenantA.unitId, allStations: false, stationIds: [STATION_ID] }],
+        units: [
+          {
+            id: tenantA.unitId,
+            allStations: false,
+            stationIds: [STATION_ID],
+            stations: [{ id: STATION_ID, name: 'Cozinha', kind: 'queue' }],
+            lateAfterMinutes: 15,
+          },
+        ],
       });
     });
 
@@ -567,6 +590,7 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
 
     it('owner resets a staff password: the staff sessions end, refresh is refused, the link works once', async () => {
       const tenant = await createTenant(platform, 'Reset colaborador');
+      await grantUnit(platform, tenant);
       await setPassword(platform, { owner: tenant.ownerId, staff: tenant.staffMemberId });
       const credentials = await credentialsOf(platform, tenant);
       const staffSession = await loginStaff(app, credentials);
@@ -615,6 +639,7 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
 
     it('deactivating a staff member ends the sessions at once (RN-03.17, service for spec 03)', async () => {
       const tenant = await createTenant(platform, 'Desativa');
+      await grantUnit(platform, tenant);
       await setPassword(platform, { staff: tenant.staffMemberId });
       const staffSession = await loginStaff(app, await credentialsOf(platform, tenant));
       const events: SessionsRevokedEvent[] = [];

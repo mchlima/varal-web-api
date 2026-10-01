@@ -32,6 +32,15 @@ export function sessionRoom(sessionId: string): string {
   return `session:${sessionId}`;
 }
 
+/**
+ * Internal room with every socket of one subject (owner or staff member), used to make them
+ * reconnect when their access changes (spec 03: permissions, units, stations). Never joinable by
+ * clients, like {@link sessionRoom}.
+ */
+export function subjectRoom(subjectType: 'owner' | 'staff', subjectId: string): string {
+  return `subject:${subjectType}:${subjectId}`;
+}
+
 const ROOM_PATTERN = /^(unit|station):(.+)$/;
 const uuidSchema = z.uuid();
 

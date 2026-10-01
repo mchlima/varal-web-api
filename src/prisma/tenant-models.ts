@@ -16,6 +16,12 @@ export const TENANT_MODELS = {
   User: 'organizationId',
   StaffMember: 'organizationId',
   StaffUnitPermission: 'organizationId',
+  Station: 'organizationId',
+  WorkflowStage: 'organizationId',
+  Category: 'organizationId',
+  Product: 'organizationId',
+  ModifierGroup: 'organizationId',
+  Modifier: 'organizationId',
 } as const satisfies Partial<Record<Prisma.ModelName, string>>;
 
 export type TenantModel = keyof typeof TENANT_MODELS;

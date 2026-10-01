@@ -15,9 +15,11 @@ export interface AllowedRooms {
  * Which `unit:` and `station:` rooms a user may access (spec 01, section 10: "o servidor só coloca o
  * aparelho em salas da organização e das unidades e estações que o usuário pode acessar").
  *
- * - Owner: every active unit of the organization. Stations arrive with spec 03; until then the owner
- *   gets no `station:` room (the station table will list the stations of the active units).
- * - Staff: the active units of `staff_unit_permissions` and the stations in their `station_ids`.
+ * - Owner: every active unit of the organization and every active station of those units (the
+ *   owner opens any station, spec 01, section 7.1).
+ * - Staff: the active units of `staff_unit_permissions` and, among their `station_ids`, the active
+ *   stations of that same unit (`station_ids` has no foreign key, so ids of another unit, of a
+ *   deactivated station or of nothing are ignored).
  *
  * Queries run through the tenant client with the organization of the session, so a unit or station
  * of another organization is never found (CA-01.02).
@@ -28,22 +30,45 @@ export class RealtimeAccessService {
 
   async allowedRooms(session: SocketSession): Promise<AllowedRooms> {
     return this.asSubject(session, async () => {
+      const db = this.prisma.db;
       if (session.subjectType === 'owner') {
-        const units = await this.prisma.db.unit.findMany({
+        const units = await db.unit.findMany({
           where: { active: true },
           select: { id: true },
           orderBy: { id: 'asc' },
         });
-        return { unitIds: units.map((unit) => unit.id), stationIds: [] };
+        const stations = await db.station.findMany({
+          where: { active: true, unit: { active: true } },
+          select: { id: true },
+          orderBy: { id: 'asc' },
+        });
+        return {
+          unitIds: units.map((unit) => unit.id),
+          stationIds: stations.map((station) => station.id),
+        };
       }
-      const permissions = await this.prisma.db.staffUnitPermission.findMany({
+      const permissions = await db.staffUnitPermission.findMany({
         where: { staffMemberId: session.subjectId, unit: { active: true } },
         select: { unitId: true, stationIds: true },
         orderBy: { unitId: 'asc' },
       });
+      const requested = permissions.flatMap((permission) =>
+        permission.stationIds.map((id) => ({ unitId: permission.unitId, id })),
+      );
+      const stations =
+        requested.length === 0
+          ? []
+          : await db.station.findMany({
+              where: { active: true, id: { in: requested.map((station) => station.id) } },
+              select: { id: true, unitId: true },
+              orderBy: { id: 'asc' },
+            });
+      const allowed = new Set(requested.map((station) => `${station.unitId}:${station.id}`));
       return {
         unitIds: permissions.map((permission) => permission.unitId),
-        stationIds: [...new Set(permissions.flatMap((permission) => permission.stationIds))],
+        stationIds: stations
+          .filter((station) => allowed.has(`${station.unitId}:${station.id}`))
+          .map((station) => station.id),
       };
     });
   }

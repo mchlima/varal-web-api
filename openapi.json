@@ -1,6 +1,15 @@
 {
   "components": {
     "schemas": {
+      "AccessChangeReason": {
+        "description": "`permissions_changed`: o dono mudou as permissões do colaborador; `unit_changed`: unidade criada, ativada ou desativada; `stations_changed`: estação criada, ativada, desativada ou com tipo trocado.",
+        "enum": [
+          "permissions_changed",
+          "unit_changed",
+          "stations_changed"
+        ],
+        "type": "string"
+      },
       "AccessCodeOrganization": {
         "additionalProperties": false,
         "properties": {
@@ -87,9 +96,84 @@
           "INVALID_PASSWORD_TOKEN",
           "WRONG_CURRENT_PASSWORD",
           "PASSWORD_RESET_LIMIT_REACHED",
+          "STAFF_WITHOUT_UNIT",
           "DEVICE_ID_REQUIRED"
         ],
         "type": "string"
+      },
+      "Category": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "defaultStationId": {
+            "description": "Estação de preparo padrão dos produtos.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "name",
+          "sortOrder",
+          "defaultStationId",
+          "active"
+        ],
+        "type": "object"
+      },
+      "CategoryList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Category"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CategoryOrderRequestInput": {
+        "properties": {
+          "categoryIds": {
+            "description": "Todas as categorias da unidade, na nova ordem.",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "type": "array"
+          }
+        },
+        "required": [
+          "categoryIds"
+        ],
+        "type": "object"
       },
       "ChangePasswordRequestInput": {
         "properties": {
@@ -108,6 +192,300 @@
         "required": [
           "currentPassword",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "CreateCategoryRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "defaultStationId": {
+            "description": "Estação de fila da unidade; sem ela, a Cozinha (ou a primeira estação de fila).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unitId",
+          "name"
+        ],
+        "type": "object"
+      },
+      "CreateModifierGroupRequestInput": {
+        "properties": {
+          "maxChoices": {
+            "description": "Máximo de escolhas, pelo menos 1.",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minChoices": {
+            "description": "Mínimo de escolhas; ≥ 1 torna o grupo obrigatório (RN-03.13).",
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "modifiers": {
+            "default": [],
+            "description": "Opções criadas junto com o grupo.",
+            "items": {
+              "properties": {
+                "active": {
+                  "type": "boolean"
+                },
+                "name": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "priceDeltaCents": {
+                  "default": 0,
+                  "description": "Acréscimo ao preço do produto, em centavos (pode ser zero).",
+                  "maximum": 100000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "sortOrder": {
+                  "description": "Posição na lista (1 é o primeiro).",
+                  "maximum": 10000,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "productId",
+          "name",
+          "minChoices",
+          "maxChoices"
+        ],
+        "type": "object"
+      },
+      "CreateModifierRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "modifierGroupId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "priceDeltaCents": {
+            "default": 0,
+            "description": "Acréscimo ao preço do produto, em centavos (pode ser zero).",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "modifierGroupId"
+        ],
+        "type": "object"
+      },
+      "CreateProductRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "categoryId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "description": "Descrição curta, até 120 caracteres.",
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "priceCents": {
+            "description": "Preço em centavos (inteiro, maior ou igual a zero; RN-03.09).",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "categoryId",
+          "name",
+          "priceCents"
+        ],
+        "type": "object"
+      },
+      "CreateStaffMemberRequestInput": {
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "format": "email",
+                "maxLength": 254,
+                "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "description": "Nova senha: de 8 a 128 caracteres.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "permissions": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/StaffPermissionInputInput"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "username": {
+            "description": "Letras, números, ponto e sublinhado (3 a 32); único na organização.",
+            "maxLength": 32,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9._]+$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "username",
+          "password"
+        ],
+        "type": "object"
+      },
+      "CreateStationRequestInput": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/StationKind"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "type": "object"
+      },
+      "CreateUnitRequestInput": {
+        "properties": {
+          "lateAfterMinutes": {
+            "default": 15,
+            "description": "Minutos a partir dos quais um item na estação aparece como atrasado (1 a 240).",
+            "maximum": 240,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
         ],
         "type": "object"
       },
@@ -245,6 +623,157 @@
         ],
         "type": "object"
       },
+      "EventMenuUpdated": {
+        "additionalProperties": false,
+        "description": "Qualquer outra alteração no cardápio da unidade. `version` é a versão do cardápio (`GET /units/{id}/menu`): o app recarrega o cardápio se a versão dele for menor.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "unitId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "version": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "unitId",
+              "version"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "menu.updated",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventProductSoldOutChanged": {
+        "additionalProperties": false,
+        "description": "Produto marcado ou desmarcado como esgotado (RN-03.11). `version` é a versão do produto: o balcão bloqueia ou libera o produto sem recarregar o cardápio.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "productId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "soldOut": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "productId",
+              "soldOut"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "product.sold_out_changed",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventSessionAccessChanged": {
+        "additionalProperties": false,
+        "description": "As unidades ou estações que o usuário acessa mudaram. A sessão continua válida: o servidor desconecta o socket logo depois, e o app busca `GET /auth/me` e reconecta (`socket.connect()`), entrando nas salas do novo acesso (spec 01, seção 10; spec 03).",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/AccessChangeReason"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.access_changed",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "occurredAt",
+          "data"
+        ],
+        "type": "object"
+      },
       "EventSessionExpired": {
         "additionalProperties": false,
         "description": "O token de acesso usado na conexão venceu. O servidor desconecta o socket logo depois; o app renova a sessão por REST (`POST /auth/refresh`) e reconecta.",
@@ -314,6 +843,66 @@
         ],
         "type": "object"
       },
+      "EventUnitConfigUpdated": {
+        "additionalProperties": false,
+        "description": "Configuração da unidade alterada (nome, tempo de atraso, estações ou fluxo). `version` é a versão da unidade: o app recarrega `GET /auth/me` e, no painel do dono, a configuração.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "unitId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "version": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "unitId",
+              "version"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "unit.config_updated",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
       "ForgotPasswordRequestInput": {
         "properties": {
           "email": {
@@ -363,6 +952,293 @@
         ],
         "type": "object"
       },
+      "Menu": {
+        "additionalProperties": false,
+        "description": "Cardápio da unidade em ordem. O dono recebe tudo (com `active`); o colaborador só categorias, produtos e modificadores ativos (RN-03.10).",
+        "properties": {
+          "categories": {
+            "items": {
+              "$ref": "#/components/schemas/MenuCategory"
+            },
+            "type": "array"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do cardápio (`menu.updated`).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unitId",
+          "version",
+          "categories"
+        ],
+        "type": "object"
+      },
+      "MenuCategory": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "defaultStationId": {
+            "description": "Estação de preparo padrão dos produtos.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "products": {
+            "items": {
+              "$ref": "#/components/schemas/MenuProduct"
+            },
+            "type": "array"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "name",
+          "sortOrder",
+          "defaultStationId",
+          "active",
+          "products"
+        ],
+        "type": "object"
+      },
+      "MenuProduct": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "categoryId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "modifierGroups": {
+            "items": {
+              "$ref": "#/components/schemas/ModifierGroup"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prepStationId": {
+            "description": "Estação de preparo resolvida: a do produto ou, sem ela, a da categoria (RN-03.08).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "priceCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "soldOut": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estação de preparo própria; `null` usa a da categoria."
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do produto (`product.sold_out_changed`).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "categoryId",
+          "name",
+          "description",
+          "priceCents",
+          "stationId",
+          "prepStationId",
+          "sortOrder",
+          "active",
+          "soldOut",
+          "version",
+          "modifierGroups"
+        ],
+        "type": "object"
+      },
+      "Modifier": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "modifierGroupId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priceDeltaCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "modifierGroupId",
+          "name",
+          "priceDeltaCents",
+          "sortOrder",
+          "active"
+        ],
+        "type": "object"
+      },
+      "ModifierGroup": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "maxChoices": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "minChoices": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "modifiers": {
+            "items": {
+              "$ref": "#/components/schemas/Modifier"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "required": {
+            "description": "Mínimo ≥ 1: o balcão não envia o item sem escolher (RN-03.13; CA-03.06, aplicado no envio do pedido, spec 04).",
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "productId",
+          "name",
+          "minChoices",
+          "maxChoices",
+          "required",
+          "sortOrder",
+          "modifiers"
+        ],
+        "type": "object"
+      },
+      "OrganizationAccess": {
+        "additionalProperties": false,
+        "properties": {
+          "accessCode": {
+            "example": "ESPT26",
+            "type": "string"
+          },
+          "link": {
+            "description": "Link de acesso da equipe (`/e/{code}`).",
+            "format": "uri",
+            "type": "string"
+          },
+          "qrSvg": {
+            "description": "QR code do link em SVG (escalável; mostre grande para escanear de outro celular).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessCode",
+          "link",
+          "qrSvg"
+        ],
+        "type": "object"
+      },
       "OwnerLoginRequestInput": {
         "properties": {
           "email": {
@@ -401,6 +1277,22 @@
         "required": [
           "limit"
         ],
+        "type": "object"
+      },
+      "PaginationQueryInput": {
+        "properties": {
+          "cursor": {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "type": "string"
+          },
+          "limit": {
+            "default": 50,
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
         "type": "object"
       },
       "PanelMe": {
@@ -505,6 +1397,12 @@
             "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
             "type": "string"
           },
+          "lateAfterMinutes": {
+            "description": "Minutos a partir dos quais um item aparece como atrasado (spec 03, seção 3).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "name": {
             "type": "string"
           },
@@ -515,6 +1413,13 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "stations": {
+            "description": "Estações que o usuário pode abrir nesta unidade, ativas e em ordem: todas para o dono, as liberadas para o colaborador.",
+            "items": {
+              "$ref": "#/components/schemas/StationSummary"
+            },
+            "type": "array"
           }
         },
         "required": [
@@ -522,7 +1427,197 @@
           "name",
           "allStations",
           "stationIds",
-          "canOperateCash"
+          "stations",
+          "canOperateCash",
+          "lateAfterMinutes"
+        ],
+        "type": "object"
+      },
+      "Product": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "categoryId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "prepStationId": {
+            "description": "Estação de preparo resolvida: a do produto ou, sem ela, a da categoria (RN-03.08).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "priceCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "soldOut": {
+            "type": "boolean"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estação de preparo própria; `null` usa a da categoria."
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do produto (`product.sold_out_changed`).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "categoryId",
+          "name",
+          "description",
+          "priceCents",
+          "stationId",
+          "prepStationId",
+          "sortOrder",
+          "active",
+          "soldOut",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ProductList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Product"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "ProductOrderRequestInput": {
+        "properties": {
+          "productIds": {
+            "description": "Todos os produtos da categoria, na nova ordem.",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "type": "array"
+          }
+        },
+        "required": [
+          "productIds"
+        ],
+        "type": "object"
+      },
+      "PutStaffPermissionsRequestInput": {
+        "properties": {
+          "units": {
+            "description": "Todas as unidades liberadas (substitui as atuais).",
+            "items": {
+              "$ref": "#/components/schemas/StaffPermissionInputInput"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "units"
+        ],
+        "type": "object"
+      },
+      "PutWorkflowRequestInput": {
+        "properties": {
+          "stages": {
+            "description": "Etapas na ordem do fluxo: de 2 a 8, a última com destino `none` (RN-03.05).",
+            "items": {
+              "properties": {
+                "id": {
+                  "description": "Id de uma etapa atual, para mantê-la (itens já pedidos apontam para ela). Sem id, cria uma etapa nova; etapas atuais fora da lista são arquivadas.",
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 60,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "stationId": {
+                  "anyOf": [
+                    {
+                      "format": "uuid",
+                      "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "target": {
+                  "$ref": "#/components/schemas/WorkflowStageTarget"
+                }
+              },
+              "required": [
+                "name",
+                "target"
+              ],
+              "type": "object"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stages"
         ],
         "type": "object"
       },
@@ -681,7 +1776,41 @@
           "refresh_token_reused",
           "new_login_on_device",
           "staff_deactivated",
+          "staff_access_removed",
           "subject_deactivated"
+        ],
+        "type": "string"
+      },
+      "SetStaffPasswordRequestInput": {
+        "properties": {
+          "password": {
+            "description": "Nova senha: de 8 a 128 caracteres.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "type": "object"
+      },
+      "SetupErrorCode": {
+        "description": "Códigos de erro da configuração da unidade (spec 03): unidades, estações, fluxo, cardápio e colaboradores.",
+        "enum": [
+          "SHIFT_OPEN",
+          "LAST_ACTIVE_UNIT",
+          "UNIT_NAME_TAKEN",
+          "STATION_NAME_TAKEN",
+          "CATEGORY_NAME_TAKEN",
+          "USERNAME_TAKEN",
+          "STATION_KIND_REQUIRED",
+          "STATION_IN_USE",
+          "INVALID_WORKFLOW",
+          "INVALID_PREP_STATION",
+          "INVALID_REFERENCE",
+          "INVALID_ORDER",
+          "INVALID_MODIFIER_LIMITS"
         ],
         "type": "string"
       },
@@ -712,6 +1841,263 @@
         ],
         "type": "object"
       },
+      "StaffMember": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hasPassword": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "$ref": "#/components/schemas/StaffUnitPermission"
+            },
+            "type": "array"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "username",
+          "email",
+          "active",
+          "hasPassword",
+          "permissions"
+        ],
+        "type": "object"
+      },
+      "StaffMemberPage": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/StaffMember"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor da próxima página; `null` na última.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "StaffPasswordResetRequestInput": {
+        "properties": {
+          "sendEmail": {
+            "default": false,
+            "description": "Também envia o link por e-mail, se o colaborador tiver e-mail.",
+            "type": "boolean"
+          }
+        },
+        "type": "object"
+      },
+      "StaffPasswordResetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "emailSent": {
+            "type": "boolean"
+          },
+          "expiresAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "link": {
+            "description": "Link de uso único (1 hora) para copiar.",
+            "format": "uri",
+            "type": "string"
+          },
+          "whatsappUrl": {
+            "description": "`https://wa.me/?text=` com a mensagem e o link (RN-03.18).",
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "link",
+          "expiresAt",
+          "emailSent",
+          "whatsappUrl"
+        ],
+        "type": "object"
+      },
+      "StaffPermissionInputInput": {
+        "properties": {
+          "canOperateCash": {
+            "default": false,
+            "type": "boolean"
+          },
+          "stationIds": {
+            "default": [],
+            "description": "Estações ativas desta unidade que o colaborador pode abrir.",
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unitId"
+        ],
+        "type": "object"
+      },
+      "StaffUnitPermission": {
+        "additionalProperties": false,
+        "properties": {
+          "canOperateCash": {
+            "type": "boolean"
+          },
+          "stationIds": {
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "stations": {
+            "description": "Estações liberadas, ativas, em ordem de exibição.",
+            "items": {
+              "$ref": "#/components/schemas/StationSummary"
+            },
+            "type": "array"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "unitName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "unitId",
+          "unitName",
+          "stationIds",
+          "stations",
+          "canOperateCash"
+        ],
+        "type": "object"
+      },
+      "Station": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/StationKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "name",
+          "kind",
+          "sortOrder",
+          "active"
+        ],
+        "type": "object"
+      },
+      "StationKind": {
+        "description": "`counter`: balcão de pedidos (abre comandas, lança pedidos, recebe); `queue`: fila de itens das etapas ligadas a ela (spec 03, seção 4.1).",
+        "enum": [
+          "counter",
+          "queue"
+        ],
+        "type": "string"
+      },
+      "StationList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Station"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "StationSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/StationKind"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind"
+        ],
+        "type": "object"
+      },
       "SubscriptionStatus": {
         "description": "Situação da assinatura da organização (RN-02.11).",
         "enum": [
@@ -721,6 +2107,294 @@
           "canceled"
         ],
         "type": "string"
+      },
+      "Unit": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "lateAfterMinutes": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "menuVersion": {
+            "description": "Versão do cardápio (`menu.updated`).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão da configuração (unidade, estações e fluxo).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "active",
+          "lateAfterMinutes",
+          "version",
+          "menuVersion",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "UnitPage": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Unit"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor da próxima página; `null` na última.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "UpdateCategoryRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "defaultStationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateModifierGroupRequestInput": {
+        "properties": {
+          "maxChoices": {
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "minChoices": {
+            "maximum": 50,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateModifierRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "priceDeltaCents": {
+            "description": "Acréscimo ao preço do produto, em centavos (pode ser zero).",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateProductRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "categoryId": {
+            "description": "Outra categoria da mesma unidade.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "description": "Descrição curta, até 120 caracteres.",
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "priceCents": {
+            "description": "Preço em centavos (inteiro, maior ou igual a zero; RN-03.09).",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateStaffMemberRequestInput": {
+        "properties": {
+          "active": {
+            "description": "Desativar encerra as sessões do colaborador na hora (RN-03.17).",
+            "type": "boolean"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "format": "email",
+                "maxLength": 254,
+                "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "description": "Letras, números, ponto e sublinhado (3 a 32); único na organização.",
+            "maxLength": 32,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9._]+$",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateStationRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/StationKind"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "sortOrder": {
+            "description": "Posição na lista (1 é o primeiro).",
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "UpdateUnitRequestInput": {
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "lateAfterMinutes": {
+            "description": "Minutos a partir dos quais um item na estação aparece como atrasado (1 a 240).",
+            "maximum": 240,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
       },
       "ValidationErrorDetails": {
         "additionalProperties": false,
@@ -754,6 +2428,134 @@
           "message"
         ],
         "type": "object"
+      },
+      "Workflow": {
+        "additionalProperties": false,
+        "properties": {
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStage"
+            },
+            "type": "array"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão da unidade (envie no `PUT` para conferência).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unitId",
+          "version",
+          "stages"
+        ],
+        "type": "object"
+      },
+      "WorkflowIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/WorkflowIssueCode"
+          },
+          "index": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Posição da etapa no corpo (a partir de 0); `null` = o fluxo todo."
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "index",
+          "message"
+        ],
+        "type": "object"
+      },
+      "WorkflowIssueCode": {
+        "description": "Problema de um fluxo recusado com `INVALID_WORKFLOW` (`details.issues`, RN-03.05 e RN-03.06).",
+        "enum": [
+          "STAGE_COUNT",
+          "NO_FINAL_STAGE",
+          "MULTIPLE_FINAL_STAGES",
+          "FINAL_STAGE_NOT_LAST",
+          "STATION_REQUIRED",
+          "STATION_NOT_ALLOWED",
+          "STATION_NOT_IN_UNIT",
+          "STATION_NOT_QUEUE",
+          "DUPLICATE_NAME"
+        ],
+        "type": "string"
+      },
+      "WorkflowStage": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "isFinal": {
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sortOrder": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Só em `fixed_station`: a estação em que o item aparece."
+          },
+          "target": {
+            "$ref": "#/components/schemas/WorkflowStageTarget"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "sortOrder",
+          "target",
+          "stationId",
+          "isFinal"
+        ],
+        "type": "object"
+      },
+      "WorkflowStageTarget": {
+        "description": "`product_station`: a estação de preparo do produto; `fixed_station`: uma estação escolhida; `none`: etapa final, o item sai das filas (spec 03, seção 4.2).",
+        "enum": [
+          "product_station",
+          "fixed_station",
+          "none"
+        ],
+        "type": "string"
       }
     },
     "securitySchemes": {
@@ -1675,6 +3477,16 @@
             },
             "description": "Credenciais inválidas: sempre a mesma resposta, exista ou não o usuário."
           },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`STAFF_WITHOUT_UNIT`: senha certa, mas o colaborador não tem nenhuma unidade ativa liberada (RN-03.16)."
+          },
           "429": {
             "content": {
               "application/json": {
@@ -1699,6 +3511,316 @@
         "summary": "Login do colaborador (código do estabelecimento, usuário e senha)",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/categories": {
+      "post": {
+        "operationId": "MenuController_createCategory",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCategoryRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CATEGORY_NAME_TAKEN`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria uma categoria (estação de preparo padrão: Cozinha)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/categories/{id}": {
+      "patch": {
+        "operationId": "MenuController_updateCategory",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCategoryRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Category"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CATEGORY_NAME_TAKEN`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera uma categoria",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/categories/{id}/products/order": {
+      "put": {
+        "operationId": "MenuController_reorderProducts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProductOrderRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProductList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Reordena os produtos da categoria",
+        "tags": [
+          "menu"
         ]
       }
     },
@@ -1730,6 +3852,2289 @@
         },
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/modifier-groups": {
+      "post": {
+        "operationId": "MenuController_createModifierGroup",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateModifierGroupRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModifierGroup"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria um grupo de modificadores (com as opções, se enviadas)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/modifier-groups/{id}": {
+      "delete": {
+        "operationId": "MenuController_deleteModifierGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Grupo removido."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Remove um grupo de modificadores e as suas opções",
+        "tags": [
+          "menu"
+        ]
+      },
+      "patch": {
+        "operationId": "MenuController_updateModifierGroup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModifierGroupRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModifierGroup"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera um grupo de modificadores",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/modifiers": {
+      "post": {
+        "operationId": "MenuController_createModifier",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateModifierRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Modifier"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria uma opção num grupo de modificadores",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/modifiers/{id}": {
+      "patch": {
+        "operationId": "MenuController_updateModifier",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateModifierRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Modifier"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera ou desativa uma opção",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/organization/access": {
+      "get": {
+        "operationId": "StaffController_access",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationAccess"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Código do estabelecimento, link `/e/{code}` e QR code (SVG)",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/products": {
+      "post": {
+        "operationId": "MenuController_createProduct",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProductRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria um produto (preço em centavos)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/products/{id}": {
+      "patch": {
+        "operationId": "MenuController_updateProduct",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProductRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VERSION_CONFLICT`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera um produto (vale para pedidos novos, RN-03.12)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/products/{id}/sold-out": {
+      "delete": {
+        "operationId": "MenuController_unmarkSoldOut",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem estação na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Desmarca o esgotado (dono e colaboradores com estação na unidade, RN-03.11)",
+        "tags": [
+          "menu"
+        ]
+      },
+      "post": {
+        "operationId": "MenuController_markSoldOut",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Product"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem estação na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Marca o produto como esgotado (dono e colaboradores com estação na unidade, RN-03.11)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/staff": {
+      "get": {
+        "operationId": "StaffController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMemberPage"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Colaboradores da organização, com as permissões por unidade",
+        "tags": [
+          "staff"
+        ]
+      },
+      "post": {
+        "operationId": "StaffController_create",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStaffMemberRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMember"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VALIDATION_FAILED` ou `INVALID_REFERENCE` (unidade ou estação inválida)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`USERNAME_TAKEN` (CA-03.07).\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cadastra um colaborador com senha inicial (RN-03.15)",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/staff/{id}": {
+      "patch": {
+        "operationId": "StaffController_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStaffMemberRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMember"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`USERNAME_TAKEN` (CA-03.07)."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera nome, usuário, e-mail ou situação (desativar encerra as sessões, RN-03.17)",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/staff/{id}/password": {
+      "put": {
+        "operationId": "StaffController_setPassword",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetStaffPasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Senha definida."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "O dono define a senha do colaborador (RN-03.19); as sessões dele são encerradas",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/staff/{id}/password-reset": {
+      "post": {
+        "operationId": "StaffController_passwordReset",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffPasswordResetRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffPasswordResetResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`PASSWORD_RESET_LIMIT_REACHED`: 3 links na última hora (RN-01.02)."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Gera o link de redefinição de senha (RN-03.18): para copiar, enviar por WhatsApp e, opcionalmente, por e-mail",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/staff/{id}/permissions": {
+      "put": {
+        "operationId": "StaffController_setPermissions",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutStaffPermissionsRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StaffMember"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE`: unidade repetida, de fora da organização, ou estação que não é ativa daquela unidade."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Substitui as permissões por unidade (estações e caixa, RN-03.16); vale na hora, inclusive no tempo real",
+        "tags": [
+          "staff"
+        ]
+      }
+    },
+    "/api/v1/stations/{id}": {
+      "patch": {
+        "operationId": "UnitsController_updateStation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStationRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Station"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_OPEN`: a unidade está com turno aberto (CA-03.03); `VERSION_CONFLICT`; nomes repetidos (`*_NAME_TAKEN`); `STATION_KIND_REQUIRED` ou `STATION_IN_USE`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Altera uma estação (nome, tipo, ordem, ativa)",
+        "tags": [
+          "units"
+        ]
+      }
+    },
+    "/api/v1/units": {
+      "get": {
+        "operationId": "UnitsController_listUnits",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnitPage"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Unidades da organização (ativas e inativas)",
+        "tags": [
+          "units"
+        ]
+      },
+      "post": {
+        "operationId": "UnitsController_createUnit",
+        "parameters": [
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUnitRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unit"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNIT_NAME_TAKEN`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria uma unidade com o template padrão de estações e fluxo (RN-03.03)",
+        "tags": [
+          "units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}": {
+      "patch": {
+        "operationId": "UnitsController_updateUnit",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUnitRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Unit"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_OPEN` (RN-03.02), `LAST_ACTIVE_UNIT` (RN-03.01), `UNIT_NAME_TAKEN` ou `VERSION_CONFLICT`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Renomeia, ativa ou desativa a unidade e ajusta o tempo de atraso",
+        "tags": [
+          "units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/categories/order": {
+      "put": {
+        "operationId": "MenuController_reorderCategories",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CategoryOrderRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CategoryList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_REFERENCE` (item de outra unidade ou inexistente), `INVALID_PREP_STATION` (RN-03.08), `INVALID_ORDER`, `INVALID_MODIFIER_LIMITS` (RN-03.13) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Reordena as categorias da unidade",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/menu": {
+      "get": {
+        "operationId": "MenuController_readMenu",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Menu"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem acesso à unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cardápio completo da unidade (dono e colaboradores da unidade)",
+        "tags": [
+          "menu"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/stations": {
+      "get": {
+        "operationId": "UnitsController_listStations",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Estações da unidade",
+        "tags": [
+          "units"
+        ]
+      },
+      "post": {
+        "operationId": "UnitsController_createStation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStationRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Station"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_OPEN`: a unidade está com turno aberto (CA-03.03); `VERSION_CONFLICT`; nomes repetidos (`*_NAME_TAKEN`); `STATION_KIND_REQUIRED` ou `STATION_IN_USE`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cria uma estação na unidade",
+        "tags": [
+          "units"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/workflow": {
+      "get": {
+        "operationId": "UnitsController_getWorkflow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workflow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Fluxo de etapas da unidade",
+        "tags": [
+          "units"
+        ]
+      },
+      "put": {
+        "operationId": "UnitsController_saveWorkflow",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutWorkflowRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Workflow"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_WORKFLOW` com `details.issues: WorkflowIssue[]` (CA-03.02), `INVALID_REFERENCE` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_OPEN` (CA-03.03) ou `VERSION_CONFLICT`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Salva o fluxo completo de uma vez (RN-03.05 a RN-03.07)",
+        "tags": [
+          "units"
         ]
       }
     }

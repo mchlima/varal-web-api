@@ -5,6 +5,7 @@ import { AppError } from '../errors/app-error.js';
 import type { Session } from '../generated/prisma/client.js';
 import { PlatformPrismaService } from '../prisma/platform-prisma.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { activeStationsOf, permittedStations } from '../units/permitted-stations.js';
 import type { AdminMe, PanelMe } from './auth.schemas.js';
 import { sessionInfoOf } from './session-cookies.js';
 
@@ -44,6 +45,9 @@ export class ProfileService {
         throw AppError.of('UNAUTHENTICATED');
       }
       const units = await db.unit.findMany({ where: { active: true }, orderBy: { name: 'asc' } });
+      const stations = await db.station.findMany({
+        where: { unitId: { in: units.map((unit) => unit.id) }, active: true },
+      });
       return {
         subject: {
           type: 'owner',
@@ -59,7 +63,9 @@ export class ProfileService {
           name: unit.name,
           allStations: true,
           stationIds: [],
+          stations: activeStationsOf(unit.id, stations),
           canOperateCash: true,
+          lateAfterMinutes: unit.lateAfterMinutes,
         })),
         session: sessionInfo,
       };
@@ -74,8 +80,11 @@ export class ProfileService {
     }
     const permissions = await db.staffUnitPermission.findMany({
       where: { staffMemberId: staff.id, unit: { active: true } },
-      include: { unit: { select: { id: true, name: true } } },
+      include: { unit: { select: { id: true, name: true, lateAfterMinutes: true } } },
       orderBy: { unit: { name: 'asc' } },
+    });
+    const stations = await db.station.findMany({
+      where: { id: { in: permissions.flatMap((permission) => permission.stationIds) } },
     });
     return {
       subject: {
@@ -86,13 +95,18 @@ export class ProfileService {
         username: staff.username,
       },
       organization: organizationInfo,
-      units: permissions.map((permission) => ({
-        id: permission.unit.id,
-        name: permission.unit.name,
-        allStations: false,
-        stationIds: permission.stationIds,
-        canOperateCash: permission.canOperateCash,
-      })),
+      units: permissions.map((permission) => {
+        const allowed = permittedStations(permission.unitId, permission.stationIds, stations);
+        return {
+          id: permission.unit.id,
+          name: permission.unit.name,
+          allStations: false,
+          stationIds: allowed.map((station) => station.id),
+          stations: allowed,
+          canOperateCash: permission.canOperateCash,
+          lateAfterMinutes: permission.unit.lateAfterMinutes,
+        };
+      }),
       session: sessionInfo,
     };
   }

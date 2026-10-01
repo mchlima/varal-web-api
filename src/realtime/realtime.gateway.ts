@@ -21,7 +21,7 @@ import {
   SESSION_EVENTS,
 } from './realtime.contracts.js';
 import { RealtimeService } from './realtime.service.js';
-import { isPublicRoom, parseRoom, roomName, sessionRoom } from './rooms.js';
+import { isPublicRoom, parseRoom, roomName, sessionRoom, subjectRoom } from './rooms.js';
 
 interface SocketData {
   session?: SocketSession;
@@ -48,7 +48,10 @@ type RealtimeSocket = Socket<DefaultEventsMap, DefaultEventsMap, DefaultEventsMa
  * - when the access token used in the handshake expires, the socket gets `session.expired` and is
  *   disconnected; the app renews the session by REST and reconnects;
  * - when the session is revoked, `RealtimeService.endSessions` sends `session.revoked` and
- *   disconnects (CA-01.05).
+ *   disconnects (CA-01.05);
+ * - when the user's access changes (spec 03: permissions, units, stations),
+ *   `RealtimeService.refreshAccess` sends `session.access_changed` and disconnects; the app reloads
+ *   `/auth/me` and reconnects, getting the rooms of the new access.
  */
 @WebSocketGateway()
 export class RealtimeGateway
@@ -133,7 +136,11 @@ export class RealtimeGateway
     });
     const rooms = await this.access.allowedRoomNames(session);
     socket.data.session = session;
-    await socket.join([sessionRoom(session.sessionId), ...rooms]);
+    await socket.join([
+      sessionRoom(session.sessionId),
+      subjectRoom(session.subjectType, session.subjectId),
+      ...rooms,
+    ]);
   }
 
   private async roomRequest(
