@@ -6,10 +6,13 @@
  * - Unit "Barraca da Praça".
  * - Owner dono@varal.local; staff members `ana` (operates cash) and `bruno`.
  * - Platform admin admin@varal.local.
+ * - DEVELOPMENT ONLY password `varal12345` for the owner, both staff members and the admin. It is set
+ *   only while the password is empty, so a password changed locally survives a new seed. The script
+ *   refuses to run with NODE_ENV=production.
  *
- * Passwords stay null: argon2 and invites arrive in phase 1b, which sets the development passwords.
  * The default stations and workflow of the unit come with spec 03.
  */
+import { hashPassword } from '../src/auth/password-hasher.js';
 import type { PrismaClient } from '../src/generated/prisma/client.js';
 
 export const SEED = {
@@ -21,6 +24,8 @@ export const SEED = {
     { name: 'Bruno', username: 'bruno', canOperateCash: false },
   ],
   platformAdmin: { name: 'Admin do Varal', email: 'admin@varal.local' },
+  /** Development only (README). */
+  devPassword: 'varal12345',
 } as const;
 
 export interface SeedResult {
@@ -33,6 +38,11 @@ export interface SeedResult {
 
 /** Uses the unscoped client: the seed runs outside any request, like the platform admin would. */
 export async function seed(prisma: PrismaClient): Promise<SeedResult> {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('The seed has development passwords and never runs in production');
+  }
+  // Hashed outside the transaction (argon2 takes a moment); used only where the password is empty.
+  const passwordHash = await hashPassword(SEED.devPassword);
   return prisma.$transaction(async (tx) => {
     const organization = await tx.organization.upsert({
       where: { accessCode: SEED.organization.accessCode },
@@ -49,8 +59,12 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
 
     const owner = await tx.user.upsert({
       where: { email: SEED.owner.email },
-      create: { organizationId, ...SEED.owner },
+      create: { organizationId, ...SEED.owner, passwordHash, emailVerifiedAt: new Date() },
       update: {},
+    });
+    await tx.user.updateMany({
+      where: { id: owner.id, passwordHash: null },
+      data: { passwordHash, emailVerifiedAt: new Date() },
     });
 
     const staffMemberIds: string[] = [];
@@ -60,7 +74,12 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
         where: { organizationId, username: { equals: staff.username, mode: 'insensitive' } },
       });
       const member =
-        existing ?? (await tx.staffMember.create({ data: { organizationId, ...staff } }));
+        existing ??
+        (await tx.staffMember.create({ data: { organizationId, ...staff, passwordHash } }));
+      await tx.staffMember.updateMany({
+        where: { id: member.id, passwordHash: null },
+        data: { passwordHash },
+      });
       await tx.staffUnitPermission.upsert({
         where: { staffMemberId_unitId: { staffMemberId: member.id, unitId: unit.id } },
         create: { organizationId, staffMemberId: member.id, unitId: unit.id, canOperateCash },
@@ -71,8 +90,12 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
 
     const platformAdmin = await tx.platformAdmin.upsert({
       where: { email: SEED.platformAdmin.email },
-      create: { ...SEED.platformAdmin },
+      create: { ...SEED.platformAdmin, passwordHash },
       update: {},
+    });
+    await tx.platformAdmin.updateMany({
+      where: { id: platformAdmin.id, passwordHash: null },
+      data: { passwordHash },
     });
 
     return {
@@ -99,7 +122,8 @@ if (import.meta.main) {
     const result = await seed(prisma);
     console.log(
       `Seed ok: organização ${SEED.organization.name} (código ${SEED.organization.accessCode}), ` +
-        `${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}.`,
+        `${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
+        `Senha de desenvolvimento: ${SEED.devPassword}.`,
     );
   } finally {
     await prisma.$disconnect();

@@ -109,6 +109,11 @@ free_offset() {
   die "nenhum PORT_OFFSET livre entre 1 e $MAX_OFFSET; remova worktrees antigos"
 }
 
+# Segredo aleatório para o .env.local (48 caracteres alfanuméricos, sem depender do openssl).
+random_secret() {
+  LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 48
+}
+
 slug_in_use() {
   local env_file
   shopt -s nullglob
@@ -169,6 +174,16 @@ PORT=$((API_BASE_PORT + offset))
 DATABASE_URL=postgresql://${DB_USER_PASS}@${DB_HOST_PORT}/${db}
 DATABASE_URL_TEST=postgresql://${DB_USER_PASS}@${DB_HOST_PORT}/${db_test}
 CORS_ORIGINS=http://localhost:${PANEL_BASE_PORT},http://localhost:${ADMIN_BASE_PORT},http://localhost:$((PANEL_BASE_PORT + offset)),http://localhost:$((ADMIN_BASE_PORT + offset))
+# Segredos de desenvolvimento deste worktree (spec 01, seção 7.2), gerados aqui e nunca commitados.
+AUTH_PANEL_JWT_SECRET=$(random_secret)
+AUTH_ADMIN_JWT_SECRET=$(random_secret)
+EMAIL_PAYLOAD_SECRET=$(random_secret)
+# E-mail em desenvolvimento: Mailpit (SMTP localhost:1025, caixa em http://localhost:8025).
+SMTP_HOST=localhost
+SMTP_PORT=1025
+# Links dos e-mails de convite e redefinição apontam para os fronts do checkout principal.
+PANEL_URL=http://localhost:${PANEL_BASE_PORT}
+ADMIN_URL=http://localhost:${ADMIN_BASE_PORT}
 EOF
 
   echo "==> instalando dependências"

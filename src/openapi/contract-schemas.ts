@@ -1,5 +1,6 @@
 import type { z } from 'zod';
 
+import { AuthErrorCodeSchema } from '../auth/auth-errors.js';
 import { PaginationQuerySchema } from '../common/pagination.js';
 import {
   ErrorCodeSchema,
@@ -36,4 +37,5 @@ export const contractSchemas: readonly z.ZodType[] = [
   ActorTypeSchema,
   EmailTypeSchema,
   EmailStatusSchema,
+  AuthErrorCodeSchema,
 ];

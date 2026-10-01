@@ -158,7 +158,7 @@ model StaffMember {
   name           String
   username       String
   email          String?
-  /// Null only for seed data until phase 1b defines development passwords.
+  /// Null until a password is defined (by the owner, spec 03, or through a reset link).
   passwordHash   String?  @map("password_hash")
   active         Boolean  @default(true)
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -214,7 +214,7 @@ model PlatformAdmin {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Authentication (filled by phase 1b)
+// Authentication (phase 1b)
 // ---------------------------------------------------------------------------------------------
 
 /// One row per device login (spec 01, section 7.2). `organization_id` is null for platform admins.
@@ -224,19 +224,29 @@ model Session {
   subjectId        String      @map("subject_id") @db.Uuid
   organizationId   String?     @map("organization_id") @db.Uuid
   deviceId         String      @map("device_id") @db.Uuid
-  refreshTokenHash String      @unique @map("refresh_token_hash")
-  expiresAt        DateTime    @map("expires_at") @db.Timestamptz(3)
-  revokedAt        DateTime?   @map("revoked_at") @db.Timestamptz(3)
-  lastUsedAt       DateTime?   @map("last_used_at") @db.Timestamptz(3)
-  userAgent        String?     @map("user_agent")
-  ip               String?
+  /// SHA-256 of the secret part of the current refresh token (the token itself is never stored).
+  refreshTokenHash         String      @unique @map("refresh_token_hash")
+  /// Hash of the token replaced by the last rotation: presenting it again is a reuse (theft) and
+  /// revokes the session, except right after the rotation (concurrent refresh, see SessionService).
+  previousRefreshTokenHash String?     @map("previous_refresh_token_hash")
+  /// Last rotation of the refresh token.
+  refreshedAt              DateTime?   @map("refreshed_at") @db.Timestamptz(3)
+  /// Sliding: every rotation pushes it 30 days ahead (spec 01, section 7.2).
+  expiresAt                DateTime    @map("expires_at") @db.Timestamptz(3)
+  revokedAt                DateTime?   @map("revoked_at") @db.Timestamptz(3)
+  /// `logout`, `password_changed`, `password_reset`, `refresh_token_reused`, `staff_deactivated`…
+  revokedReason            String?     @map("revoked_reason")
+  lastUsedAt               DateTime?   @map("last_used_at") @db.Timestamptz(3)
+  userAgent                String?     @map("user_agent")
+  ip                       String?
   /// "Entrar como" session (spec 02); no foreign key until that table exists.
-  impersonationId  String?     @map("impersonation_id") @db.Uuid
-  createdAt        DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  impersonationId          String?     @map("impersonation_id") @db.Uuid
+  createdAt                DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([subjectType, subjectId])
   @@index([organizationId])
+  @@index([expiresAt])
   @@map("sessions")
 }
 
@@ -253,7 +263,24 @@ model PasswordToken {
   updatedAt   DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@index([subjectType, subjectId, purpose])
+  @@index([createdAt])
   @@map("password_tokens")
+}
+
+/// Consecutive failed logins per identifier (spec 01, section 7.3): 10 in a row lock the identifier
+/// for 15 minutes. Rows exist for unknown identifiers too, so the lock never reveals whether a user
+/// exists. `key` is a SHA-256 of `<context>:<identifier>` (no e-mail in clear text).
+model LoginThrottle {
+  id           String    @id @default(uuid(7)) @db.Uuid
+  key          String    @unique
+  failedCount  Int       @default(0) @map("failed_count")
+  lockedUntil  DateTime? @map("locked_until") @db.Timestamptz(3)
+  lastFailedAt DateTime  @map("last_failed_at") @db.Timestamptz(3)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([lastFailedAt])
+  @@map("login_throttles")
 }
 
 // ---------------------------------------------------------------------------------------------

@@ -181,19 +181,25 @@ export function describeTenantIsolation(model: string, spec: TenantIsolationSpec
 /**
  * HTTP level of CA-01.02: `as` (organization B) calling a route with an id of organization A gets
  * 404 `NOT_FOUND`, the same answer as a missing id.
+ *
+ * `as` authenticates through the stub (`createTestApp()`); with the real authentication
+ * (`createTestApp({ auth: 'real' })`) pass the session cookie of B in `headers` instead
+ * (`{ Cookie: jar.header() }`, see auth-kit.ts).
  */
 export async function expectNotFoundForOtherTenant(
   app: NestExpressApplication,
   options: {
     method: 'get' | 'post' | 'patch' | 'put' | 'delete';
     path: string;
-    as: AuthContext;
+    as?: AuthContext;
+    headers?: Record<string, string>;
     body?: object;
   },
 ): Promise<void> {
   let call = request(app.getHttpServer())
     [options.method](options.path)
-    .set(authHeaders(options.as));
+    .set(options.as ? authHeaders(options.as) : {})
+    .set(options.headers ?? {});
   if (options.body !== undefined) {
     call = call.send(options.body);
   }
