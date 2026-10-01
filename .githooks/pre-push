@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+# Blocks pushes to main. Changes reach main only through pull requests (see AGENTS.md).
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "Push recusado: a main só recebe mudanças por pull request." >&2
+    echo "Faça push da sua branch de trabalho e abra um PR (veja o AGENTS.md)." >&2
+    exit 1
+  fi
+done
+exit 0

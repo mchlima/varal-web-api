@@ -1,0 +1,9 @@
+#!/usr/bin/env sh
+# Blocks commits on main. Every change goes through a work branch and a PR (see AGENTS.md).
+branch="$(git symbolic-ref --short HEAD 2>/dev/null || true)"
+if [ "$branch" = "main" ]; then
+  echo "Commit recusado: você está na branch main." >&2
+  echo "Crie uma branch de trabalho num worktree próprio e abra um PR (veja o AGENTS.md)." >&2
+  exit 1
+fi
+exit 0
