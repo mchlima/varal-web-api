@@ -10,13 +10,18 @@ export const SupportAccessSchema = z
   .object({
     id: z.uuid(),
     adminName: z.string(),
-    reason: z.string(),
+    reason: z.string().nullable().meta({
+      description: 'Motivo, só nos acessos em que foi informado (opcional, RN-02.22).',
+    }),
     startedAt: z.iso.datetime(),
     endedAt: z.iso
       .datetime()
       .nullable()
       .meta({ description: 'Fim do acesso; `null` enquanto está em andamento.' }),
-    endedBy: z.enum(['admin', 'expired']).nullable(),
+    endedBy: z.enum(['admin', 'expired']).nullable().meta({
+      description:
+        '`expired` só no histórico dos acessos antigos, do tempo do limite de 60 minutos (RN-02.17).',
+    }),
     active: z.boolean(),
   })
   .meta({
@@ -39,13 +44,12 @@ export class SupportAccessController {
 
   @Get()
   @ApiOperation({
-    summary: 'Acessos de suporte feitos na organização (admin, motivo, início e fim)',
+    summary: 'Acessos de suporte feitos na organização (admin, início e fim; motivo se houver)',
   })
   @ApiOkResponse({ standardSchema: SupportAccessPageSchema })
   async list(
     @Query({ schema: PaginationQuerySchema }) query: z.infer<typeof PaginationQuerySchema>,
   ): Promise<z.infer<typeof SupportAccessPageSchema>> {
-    const now = new Date();
     const args = pageArgs(query, 'desc');
     const rows = await this.prisma.db.impersonationSession.findMany({
       ...args,
@@ -53,18 +57,15 @@ export class SupportAccessController {
     });
     const page = toPage(rows, query.limit);
     return {
-      data: page.data.map((row) => {
-        const expired = row.endedAt === null && row.expiresAt <= now;
-        return {
-          id: row.id,
-          adminName: row.platformAdmin.name,
-          reason: row.reason,
-          startedAt: row.startedAt.toISOString(),
-          endedAt: (row.endedAt ?? (expired ? row.expiresAt : null))?.toISOString() ?? null,
-          endedBy: row.endedBy ?? (expired ? 'expired' : null),
-          active: row.endedAt === null && !expired,
-        };
-      }),
+      data: page.data.map((row) => ({
+        id: row.id,
+        adminName: row.platformAdmin.name,
+        reason: row.reason,
+        startedAt: row.startedAt.toISOString(),
+        endedAt: row.endedAt?.toISOString() ?? null,
+        endedBy: row.endedBy,
+        active: row.endedAt === null,
+      })),
       nextCursor: page.nextCursor,
     };
   }

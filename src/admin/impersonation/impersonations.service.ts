@@ -3,7 +3,6 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AuditService } from '../../audit/audit.service.js';
 import {
   IMPERSONATION_HANDOFF_TTL_MS,
-  IMPERSONATION_TTL_MS,
   ImpersonationService,
 } from '../../auth/impersonation.service.js';
 import { hashToken, randomToken } from '../../auth/secure-token.js';
@@ -26,9 +25,8 @@ type ImpersonationRow = Prisma.ImpersonationSessionGetPayload<{
   include: typeof impersonationInclude;
 }>;
 
-/** Ended, or past its 60 minutes even before the job marks it (CA-02.08). */
-function toImpersonation(row: ImpersonationRow, now: Date): ImpersonationResponse {
-  const expired = row.endedAt === null && row.expiresAt <= now;
+/** An "entrar como" is active until the admin ends it (RN-02.17, CA-02.08). */
+function toImpersonation(row: ImpersonationRow): ImpersonationResponse {
   return {
     id: row.id,
     organizationId: row.organizationId,
@@ -38,10 +36,10 @@ function toImpersonation(row: ImpersonationRow, now: Date): ImpersonationRespons
     ownerId: row.ownerId,
     reason: row.reason,
     startedAt: row.startedAt.toISOString(),
-    expiresAt: row.expiresAt.toISOString(),
-    endedAt: (row.endedAt ?? (expired ? row.expiresAt : null))?.toISOString() ?? null,
-    endedBy: row.endedBy ?? (expired ? 'expired' : null),
-    active: row.endedAt === null && !expired,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+    endedAt: row.endedAt?.toISOString() ?? null,
+    endedBy: row.endedBy,
+    active: row.endedAt === null,
   };
 }
 
@@ -62,10 +60,13 @@ export class ImpersonationsService {
     private readonly audit: AuditService,
   ) {}
 
-  /** RN-02.17: organization and reason; 60 minutes; returns the one-time link to the panel. */
+  /**
+   * RN-02.17: only the organization (the reason is optional, kept for compatibility); no deadline,
+   * it lasts until the admin ends it. Returns the one-time link to the panel (2 minutes, RN-02.21).
+   */
   async start(
     adminId: string,
-    input: { organizationId: string; reason: string },
+    input: { organizationId: string; reason?: string | undefined },
     now = new Date(),
   ): Promise<{
     impersonation: ImpersonationResponse;
@@ -91,9 +92,8 @@ export class ImpersonationsService {
           organizationId: organization.id,
           platformAdminId: adminId,
           ownerId: owner.id,
-          reason: input.reason,
+          reason: input.reason ?? null,
           startedAt: now,
-          expiresAt: new Date(now.getTime() + IMPERSONATION_TTL_MS),
           handoffTokenHash: hashToken(token),
           handoffExpiresAt,
         },
@@ -107,14 +107,13 @@ export class ImpersonationsService {
         after: {
           ownerId: owner.id,
           startedAt: created.startedAt.toISOString(),
-          expiresAt: created.expiresAt.toISOString(),
         },
-        metadata: { reason: input.reason },
+        metadata: input.reason === undefined ? {} : { reason: input.reason },
       });
       return created;
     });
     return {
-      impersonation: toImpersonation(row, now),
+      impersonation: toImpersonation(row),
       handoffUrl: `${this.env.PANEL_URL}/entrar-como#token=${token}`,
       handoffExpiresAt: handoffExpiresAt.toISOString(),
     };
@@ -127,18 +126,13 @@ export class ImpersonationsService {
       active?: 'true' | 'false' | undefined;
       mine?: 'true' | 'false' | undefined;
     },
-    now = new Date(),
   ): Promise<Page<ImpersonationResponse>> {
     const args = pageArgs(query, 'desc');
     const active = flagOf(query.active);
-    const activeWhere: Prisma.ImpersonationSessionWhereInput = {
-      endedAt: null,
-      expiresAt: { gt: now },
-    };
     const filters: Prisma.ImpersonationSessionWhereInput = {
       ...(query.organizationId === undefined ? {} : { organizationId: query.organizationId }),
       ...(flagOf(query.mine) === true ? { platformAdminId: adminId } : {}),
-      ...(active === undefined ? {} : active ? activeWhere : { NOT: activeWhere }),
+      ...(active === undefined ? {} : { endedAt: active ? null : { not: null } }),
     };
     const rows = await this.platform.impersonationSession.findMany({
       ...args,
@@ -146,7 +140,7 @@ export class ImpersonationsService {
       include: impersonationInclude,
     });
     const page = toPage(rows, query.limit);
-    return { data: page.data.map((row) => toImpersonation(row, now)), nextCursor: page.nextCursor };
+    return { data: page.data.map(toImpersonation), nextCursor: page.nextCursor };
   }
 
   /** Only the admin of the session ends it (spec 02, section 10); its panel sessions stop at once. */
@@ -161,36 +155,16 @@ export class ImpersonationsService {
           message: 'Só o admin que abriu este acesso de suporte pode encerrá-lo.',
         });
       }
-      if (current.endedAt !== null || current.expiresAt <= now) {
+      if (current.endedAt !== null) {
         throw adminError('IMPERSONATION_NOT_ACTIVE');
       }
-      return this.impersonation.end(tx, id, 'admin', now);
+      return this.impersonation.end(tx, id, now);
     });
     result.notify();
     const row = await this.platform.impersonationSession.findUniqueOrThrow({
       where: { id },
       include: impersonationInclude,
     });
-    return toImpersonation(row, now);
-  }
-
-  /** Job: marks the impersonations past their 60 minutes as `expired` (their sessions already stopped). */
-  async endExpired(now = new Date()): Promise<number> {
-    const due = await this.platform.impersonationSession.findMany({
-      where: { endedAt: null, expiresAt: { lte: now } },
-      select: { id: true },
-      take: 100,
-    });
-    let count = 0;
-    for (const { id } of due) {
-      const result = await this.platform.$transaction((tx) =>
-        this.impersonation.end(tx, id, 'expired', now),
-      );
-      if (result.ended) {
-        result.notify();
-        count++;
-      }
-    }
-    return count;
+    return toImpersonation(row);
   }
 }

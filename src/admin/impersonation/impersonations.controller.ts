@@ -37,7 +37,8 @@ export class ImpersonationsController {
   @Post()
   @RequirePermission('impersonation:use')
   @ApiOperation({
-    summary: 'Abre um "entrar como" de 60 minutos e devolve o link de uso único do app (RN-02.17)',
+    summary:
+      'Abre um "entrar como" (sem prazo, até o admin encerrar) e devolve o link de uso único do app (RN-02.17)',
   })
   @ApiCreatedResponse({ standardSchema: StartedImpersonationSchema })
   start(

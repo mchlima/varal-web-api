@@ -3219,7 +3219,7 @@
                 "type": "null"
               }
             ],
-            "description": "Fim real; num acesso que venceu, o horário do vencimento."
+            "description": "Fim do acesso; `null` enquanto está em andamento."
           },
           "endedBy": {
             "anyOf": [
@@ -3232,9 +3232,18 @@
             ]
           },
           "expiresAt": {
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "Sempre `null`: o \"entrar como\" não tem prazo e dura até o admin encerrar (RN-02.17). Preenchido só nos acessos antigos, do tempo do limite de 60 minutos."
           },
           "id": {
             "format": "uuid",
@@ -3260,7 +3269,11 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "description": "Motivo, só nos acessos em que foi informado (opcional, RN-02.17).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "startedAt": {
             "format": "date-time",
@@ -3285,7 +3298,7 @@
         "type": "object"
       },
       "ImpersonationEndedBy": {
-        "description": "Como o \"entrar como\" terminou: pelo admin (ou \"Encerrar acesso\" no app) ou por tempo.",
+        "description": "Como o \"entrar como\" terminou: pelo admin (ou \"Encerrar acesso\" no app). `expired` só aparece no histórico dos acessos antigos, do tempo em que havia limite de 60 minutos (RN-02.17).",
         "enum": [
           "admin",
           "expired"
@@ -4905,9 +4918,18 @@
             "type": "string"
           },
           "expiresAt": {
-            "format": "date-time",
-            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "deprecated": true,
+            "description": "Sempre `null`: o \"entrar como\" não tem prazo e dura até o admin encerrar (RN-02.17)."
           },
           "id": {
             "format": "uuid",
@@ -6494,15 +6516,14 @@
             "type": "string"
           },
           "reason": {
-            "description": "Motivo do acesso, pelo menos 10 caracteres (RN-02.17).",
+            "description": "Opcional, aceito só por compatibilidade: o admin não informa mais motivo (RN-02.17). Se vier, precisa ter pelo menos 10 caracteres.",
             "maxLength": 500,
             "minLength": 10,
             "type": "string"
           }
         },
         "required": [
-          "organizationId",
-          "reason"
+          "organizationId"
         ],
         "type": "object"
       },
@@ -6725,7 +6746,8 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "`expired` só no histórico dos acessos antigos, do tempo do limite de 60 minutos (RN-02.17)."
           },
           "id": {
             "format": "uuid",
@@ -6733,7 +6755,11 @@
             "type": "string"
           },
           "reason": {
-            "type": "string"
+            "description": "Motivo, só nos acessos em que foi informado (opcional, RN-02.22).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "startedAt": {
             "format": "date-time",
@@ -9134,7 +9160,7 @@
             "adminSession": []
           }
         ],
-        "summary": "Abre um \"entrar como\" de 60 minutos e devolve o link de uso único do app (RN-02.17)",
+        "summary": "Abre um \"entrar como\" (sem prazo, até o admin encerrar) e devolve o link de uso único do app (RN-02.17)",
         "tags": [
           "admin-impersonations"
         ],
@@ -11114,7 +11140,7 @@
     },
     "/api/v1/auth/impersonation": {
       "post": {
-        "description": "Chamado pela página `/entrar-como` do painel com o token do fragmento. Exige o cookie de sessão do admin que gerou o link (mesmo navegador) e o `X-Device-Id` do painel. A sessão aberta é do dono, dura até o fim do \"entrar como\" (60 min, CA-02.08) e não dá acesso a outras organizações nem ao admin.",
+        "description": "Chamado pela página `/entrar-como` do painel com o token do fragmento. Exige o cookie de sessão do admin que gerou o link (mesmo navegador) e o `X-Device-Id` do painel. A sessão aberta é do dono, segue as regras normais de renovação e termina na hora em que o \"entrar como\" é encerrado (CA-02.08) e não dá acesso a outras organizações nem ao admin.",
         "operationId": "ImpersonationAuthController_exchange",
         "parameters": [
           {
@@ -15119,7 +15145,7 @@
             "panelSession": []
           }
         ],
-        "summary": "Acessos de suporte feitos na organização (admin, motivo, início e fim)",
+        "summary": "Acessos de suporte feitos na organização (admin, início e fim; motivo se houver)",
         "tags": [
           "support-access"
         ]

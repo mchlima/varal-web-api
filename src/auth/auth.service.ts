@@ -240,7 +240,7 @@ export class AuthService {
     if (session.impersonationId === null) {
       return { claims, session, impersonation: null };
     }
-    // An "entrar como" session stops when the admin ends it or it expires (CA-02.08).
+    // An "entrar como" session stops as soon as the admin ends it (CA-02.08).
     const impersonation = await this.impersonations.findActive(session.impersonationId);
     if (impersonation?.organizationId !== session.organizationId) {
       return null;
@@ -254,13 +254,7 @@ export class AuthService {
     if (result.kind !== 'rotated') {
       throw AppError.of('UNAUTHENTICATED');
     }
-    const accessToken = await this.tokens.issue(
-      area,
-      this.claimsOf(result.session),
-      new Date(),
-      // The access token of an "entrar como" never outlives it (CA-02.08).
-      result.session.impersonationId === null ? undefined : result.session.expiresAt,
-    );
+    const accessToken = await this.tokens.issue(area, this.claimsOf(result.session), new Date());
     return { session: result.session, accessToken, refreshToken: result.refreshToken };
   }
 
@@ -304,7 +298,7 @@ export class AuthService {
       const impersonation =
         found.impersonationId === null
           ? null
-          : await this.impersonations.end(tx, found.impersonationId, 'admin', new Date(), {
+          : await this.impersonations.end(tx, found.impersonationId, new Date(), {
               via: 'panel_logout',
             });
       return { revoked: ended, impersonationEnded: impersonation };

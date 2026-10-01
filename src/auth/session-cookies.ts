@@ -25,11 +25,8 @@ export function setSessionCookies(response: Response, area: AuthArea, issued: Is
   response.cookie(names.refresh, issued.refreshToken, {
     ...baseOptions(),
     path: names.refreshPath,
-    // 30 days, or what is left of an "entrar como" (spec 02, CA-02.08).
-    maxAge:
-      issued.session.impersonationId === null
-        ? REFRESH_TOKEN_TTL_MS
-        : Math.max(0, issued.session.expiresAt.getTime() - Date.now()),
+    // 30 days, also in an "entrar como": it stops when the admin ends it (spec 02, CA-02.08).
+    maxAge: REFRESH_TOKEN_TTL_MS,
   });
 }
 

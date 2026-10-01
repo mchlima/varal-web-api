@@ -124,7 +124,8 @@ enum AnnouncementStatus {
   @@map("announcement_status")
 }
 
-/// How an "entrar como" session ended (spec 02, section 9).
+/// How an "entrar como" session ended (spec 02, section 9). `expired` only in the history of the
+/// accesses that had the old 60-minute limit; new ones end only by the admin.
 enum ImpersonationEndedBy {
   admin
   expired
@@ -1165,11 +1166,12 @@ model ImpersonationSession {
   platformAdminId  String                @map("platform_admin_id") @db.Uuid
   /// The owner the admin acts as (RN-02.18).
   ownerId          String                @map("owner_id") @db.Uuid
-  /// At least 10 characters (RN-02.17).
-  reason           String
+  /// Optional, kept for compatibility: the admin is no longer asked for a reason (RN-02.17).
+  reason           String?
   startedAt        DateTime              @map("started_at") @db.Timestamptz(3)
-  /// started_at + 60 minutes (RN-02.17, CA-02.08).
-  expiresAt        DateTime              @map("expires_at") @db.Timestamptz(3)
+  /// Always null: an "entrar como" has no deadline and lasts until the admin ends it (RN-02.17).
+  /// Kept only for the history of the accesses that had the old 60-minute limit.
+  expiresAt        DateTime?             @map("expires_at") @db.Timestamptz(3)
   endedAt          DateTime?             @map("ended_at") @db.Timestamptz(3)
   endedBy          ImpersonationEndedBy? @map("ended_by")
   /// SHA-256 of the one-time handoff token; null once used.

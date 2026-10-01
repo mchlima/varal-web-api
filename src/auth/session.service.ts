@@ -112,12 +112,12 @@ export class SessionService {
 
   /**
    * Opens the panel session of an "entrar como" (spec 02, RN-02.21): the owner as subject, bound to
-   * the impersonation and ending with it (`expires_at` of the impersonation, never extended by a
-   * refresh). Other sessions of the owner are left alone.
+   * the impersonation. It is renewed like any other session, and revoked at once when the
+   * impersonation ends (`revokeForImpersonation`). Other sessions of the owner are left alone.
    */
   async createForImpersonation(
     tx: AuthDb,
-    input: NewSession & { impersonationId: string; expiresAt: Date },
+    input: NewSession & { impersonationId: string },
     now = new Date(),
   ): Promise<{ session: Session; refreshToken: string }> {
     const secret = randomToken();
@@ -128,7 +128,7 @@ export class SessionService {
         organizationId: input.organizationId,
         deviceId: input.deviceId,
         refreshTokenHash: hashToken(secret),
-        expiresAt: input.expiresAt,
+        expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
         lastUsedAt: now,
         userAgent: userAgentOf(input.userAgent),
         ip: input.ip,
@@ -138,7 +138,7 @@ export class SessionService {
     return { session, refreshToken: `${session.id}.${secret}` };
   }
 
-  /** Ends the panel sessions of an "entrar como" (the admin ended it, or it expired). */
+  /** Ends the panel sessions of an "entrar como" when the admin ends it (CA-02.08). */
   async revokeForImpersonation(
     tx: AuthDb,
     impersonationId: string,
@@ -208,11 +208,7 @@ export class SessionService {
           previousRefreshTokenHash: session.refreshTokenHash,
           refreshedAt: now,
           lastUsedAt: now,
-          // An "entrar como" session never outlives the impersonation (CA-02.08).
-          expiresAt:
-            session.impersonationId === null
-              ? new Date(now.getTime() + REFRESH_TOKEN_TTL_MS)
-              : session.expiresAt,
+          expiresAt: new Date(now.getTime() + REFRESH_TOKEN_TTL_MS),
           userAgent: userAgentOf(client.userAgent),
           ip: client.ip,
         },

@@ -238,11 +238,11 @@ Período em dias de Brasília (padrão: últimos 30). Organizações por situaç
 
 Decisão do dono do projeto para o MVP: acesso total (RN-02.18), com `impersonation:use`, sempre auditado e listado ao dono. Como a API tem host próprio e os cookies do app e do admin ficam no mesmo host (distinguidos pelo nome, spec 01, seção 4), o fluxo é:
 
-1. O admin chama `POST /admin/impersonations` com a organização e o motivo (mínimo 10 caracteres). A API grava `impersonation_sessions` (60 min, RN-02.17), audita `impersonation.started` e devolve `handoffUrl` = `{PANEL_URL}/entrar-como#token=...`: um token de uso único, válido por 2 minutos, guardado só como hash, no fragmento (não vai para logs nem `Referer`).
+1. O admin chama `POST /admin/impersonations` só com a organização: não há motivo (o campo `reason` continua aceito, opcional, por compatibilidade; se vier, mínimo 10 caracteres) nem prazo, o acesso dura até o admin encerrar (RN-02.17; `reason` e `expires_at` ficam nulos e só existem no histórico dos acessos antigos). A API grava `impersonation_sessions`, audita `impersonation.started` e devolve `handoffUrl` = `{PANEL_URL}/entrar-como#token=...`: um token de uso único, válido por 2 minutos, guardado só como hash, no fragmento (não vai para logs nem `Referer`).
 2. O app do admin abre esse link numa nova aba. A página `/entrar-como` do painel chama `POST /api/v1/auth/impersonation` com o token e o próprio `X-Device-Id`. O navegador manda junto o cookie de acesso do admin (mesmo host da API): **a API exige a sessão do mesmo admin que abriu o acesso**, então um link vazado não funciona em outro navegador (`401` sem sessão do admin, `400 INVALID_IMPERSONATION_TOKEN` para link usado, vencido ou de outro admin).
-3. A API abre uma sessão do app **como o dono** (`sessions.impersonation_id`), com os cookies do app, que termina junto com o "entrar como": a renovação nunca passa de `expires_at` e o token de acesso também não (CA-02.08). Cada requisição dessa sessão leva `impersonatorId` e `impersonationId` no contexto: a auditoria grava o dono como ator, o admin em `impersonator_id` e a sessão em `impersonation_id` (RN-02.20). O `GET /auth/me` traz `impersonation` (`adminName`, `expiresAt`) para a faixa fixa (RN-02.19).
-4. Termina por `POST /admin/impersonations/{id}/end` (só o admin que abriu), pelo "Encerrar acesso" do painel (`POST /auth/logout` da sessão do "entrar como") ou por tempo; as sessões caem na hora e o socket recebe `session.revoked` (`impersonation_ended`). A sessão nunca vale no admin nem em outra organização (RN-02.21), e trocar a senha do dono é recusado (`403 NOT_ALLOWED_DURING_IMPERSONATION`).
-5. O dono vê os acessos em `GET /api/v1/support-access` (admin, motivo, início e fim; RN-02.22).
+3. A API abre uma sessão do app **como o dono** (`sessions.impersonation_id`), com os cookies do app, que segue as regras normais de renovação (spec 01) e termina na hora em que o "entrar como" é encerrado: o guard confere o "entrar como" a cada requisição (CA-02.08). Cada requisição dessa sessão leva `impersonatorId` e `impersonationId` no contexto: a auditoria grava o dono como ator, o admin em `impersonator_id` e a sessão em `impersonation_id` (RN-02.20). O `GET /auth/me` traz `impersonation` (`adminName`, `startedAt`; `expiresAt` sempre `null`, obsoleto) para a faixa fixa (RN-02.19).
+4. Termina por `POST /admin/impersonations/{id}/end` (só o admin que abriu), pelo "Encerrar acesso" do painel (`POST /auth/logout` da sessão do "entrar como"); nenhum job encerra por tempo. As sessões caem na hora e o socket recebe `session.revoked` (`impersonation_ended`). A sessão nunca vale no admin nem em outra organização (RN-02.21), e trocar a senha do dono é recusado (`403 NOT_ALLOWED_DURING_IMPERSONATION`).
+5. O dono vê os acessos em `GET /api/v1/support-access` (admin, início e fim; motivo só nos acessos em que foi informado; RN-02.22).
 
 ### E-mails e auditoria (seção 8)
 
@@ -359,7 +359,7 @@ O `curl` grava os cookies `__Host-`/`__Secure-` com o prefixo `#HttpOnly_` no `j
 
 - `email.send`: envio de e-mail (acima);
 - `maintenance.cleanup`: todo dia às 04:00 (São Paulo), apaga chaves de idempotência vencidas, sessões encerradas ou vencidas há mais de 30 dias, links usados ou vencidos com mais de 1 dia e contadores de login parados há 1 dia;
-- `admin.minutely`: a cada minuto, publica os comunicados agendados que chegaram na data e marca como `expired` os "entrar como" que passaram dos 60 minutos (spec 02, abaixo).
+- `admin.minutely`: a cada minuto, publica os comunicados agendados que chegaram na data (spec 02, abaixo). O "entrar como" não tem prazo e não passa por este job.
 
 ## Contratos (OpenAPI)
 
