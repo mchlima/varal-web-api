@@ -291,7 +291,7 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
       // 15 minutes later (moved in the database).
       await platform.loginThrottle.updateMany({
         where: { lockedUntil: { not: null } },
-        data: { lockedUntil: new Date(Date.now() - 1000) },
+        data: { lockedUntil: new Date(Date.now() - 60 * 60_000) },
       });
       await attempt(TEST_PASSWORD).expect(200);
     });
@@ -742,7 +742,7 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
       const ownerToken = /token=([^&]+)/.exec(new URL(ownerLink.link).hash)?.[1] ?? '';
       await platform.passwordToken.updateMany({
         where: { subjectId: tenantB.ownerId, usedAt: null },
-        data: { expiresAt: new Date(Date.now() - 1000) },
+        data: { expiresAt: new Date(Date.now() - 60 * 60_000) },
       });
       await http()
         .post(`${API}/auth/password/reset`)

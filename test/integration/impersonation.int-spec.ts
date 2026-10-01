@@ -161,7 +161,7 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     const late = await start();
     await platform.impersonationSession.update({
       where: { id: late.impersonation.id },
-      data: { handoffExpiresAt: new Date(Date.now() - 1_000) },
+      data: { handoffExpiresAt: new Date(Date.now() - 60 * 60_000) },
     });
     await http()
       .post(`${API}/auth/impersonation`)
@@ -265,7 +265,7 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     // The impersonation ends (expires) while the session row would still be valid.
     await platform.impersonationSession.update({
       where: { id: started.impersonation.id },
-      data: { expiresAt: new Date(Date.now() - 1_000) },
+      data: { expiresAt: new Date(Date.now() - 60 * 60_000) },
     });
     await asPanel(tab, 'get', `${API}/auth/me`).expect(401);
   });

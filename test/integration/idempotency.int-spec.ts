@@ -150,7 +150,7 @@ describe.skipIf(!databaseUrl)('Idempotency-Key (spec 01, section 5)', () => {
     await post({ name: uniqueName() }, key).expect(201);
     await platform.idempotencyKey.updateMany({
       where: { key },
-      data: { expiresAt: new Date(Date.now() - 1000) },
+      data: { expiresAt: new Date(Date.now() - 60 * 60_000) },
     });
     const name = uniqueName();
     const response = await post({ name }, key).expect(201);
@@ -180,7 +180,7 @@ describe.skipIf(!databaseUrl)('Idempotency-Key (spec 01, section 5)', () => {
     await post({ name: uniqueName() }, key).expect(201);
     await platform.idempotencyKey.updateMany({
       where: { key },
-      data: { expiresAt: new Date(Date.now() - 1000) },
+      data: { expiresAt: new Date(Date.now() - 60 * 60_000) },
     });
     const purged = await app.get(IdempotencyService).purgeExpired();
     expect(purged).toBeGreaterThanOrEqual(1);
