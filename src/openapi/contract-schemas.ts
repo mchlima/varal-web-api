@@ -1,7 +1,10 @@
 import type { z } from 'zod';
 
+import { AdminErrorCodeSchema } from '../admin/admin-errors.js';
+import { PermissionSchema } from '../admin/rbac/permissions.js';
 import { AuthErrorCodeSchema } from '../auth/auth-errors.js';
 import { PaginationQuerySchema } from '../common/pagination.js';
+import { SubscriptionErrorCodeSchema } from '../common/subscription.js';
 import {
   ErrorCodeSchema,
   ErrorResponseSchema,
@@ -36,6 +39,10 @@ export const contractSchemas: readonly z.ZodType[] = [
   EmailTypeSchema,
   EmailStatusSchema,
   AuthErrorCodeSchema,
+  // Spec 02: permission catalog (RN-02.03) and error codes of the admin and of the subscription.
+  PermissionSchema,
+  AdminErrorCodeSchema,
+  SubscriptionErrorCodeSchema,
   ...realtimeContractSchemas,
   SetupErrorCodeSchema,
   ...unitContractSchemas,

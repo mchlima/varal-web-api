@@ -160,6 +160,27 @@ export class PasswordLinkService {
     );
   }
 
+  /**
+   * Reset of an admin by another admin with `admin.users:manage` (spec 01, section 7.4; spec 02).
+   * Runs in the caller's transaction; RN-01.02 applies (429 after 3 links in an hour).
+   */
+  async issueAdminPasswordReset(tx: AuthDb, platformAdminId: string): Promise<IssuedLink> {
+    const admin = await tx.platformAdmin.findUniqueOrThrow({ where: { id: platformAdminId } });
+    return this.issue(
+      tx,
+      {
+        subjectType: 'platform_admin',
+        subjectId: admin.id,
+        organizationId: null,
+        recipientName: admin.name,
+        organizationName: null,
+        email: admin.email,
+      },
+      'reset',
+      'admin_password_reset',
+    );
+  }
+
   /** "Esqueci a senha" of the admin, with the same guarantees as the owner's (RN-01.03). */
   async requestAdminPasswordReset(email: string): Promise<void> {
     await this.withMinimumDuration(async () => {

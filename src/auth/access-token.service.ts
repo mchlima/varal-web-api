@@ -41,16 +41,21 @@ export class AccessTokenService {
     };
   }
 
+  /** `notAfter` caps the expiration (the end of an "entrar como" session, CA-02.08). */
   async issue(
     area: AuthArea,
     claims: AccessTokenClaims,
     now = new Date(),
+    notAfter?: Date,
   ): Promise<IssuedAccessToken> {
     if (!AREA_SUBJECTS[area].includes(claims.subjectType)) {
       throw new Error(`A ${claims.subjectType} cannot get a token of the ${area} area`);
     }
     const issuedAt = Math.floor(now.getTime() / 1000);
-    const expiresAt = issuedAt + ACCESS_TOKEN_TTL_SECONDS;
+    const expiresAt = Math.min(
+      issuedAt + ACCESS_TOKEN_TTL_SECONDS,
+      notAfter === undefined ? Number.POSITIVE_INFINITY : Math.floor(notAfter.getTime() / 1000),
+    );
     const token = await new SignJWT({
       typ: claims.subjectType,
       sid: claims.sessionId,

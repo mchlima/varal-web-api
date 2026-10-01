@@ -15,6 +15,7 @@ import type { AuthDb } from './auth-db.js';
 import { AREA_SUBJECTS, type AuthArea } from './auth-area.js';
 import { authError } from './auth-errors.js';
 import { AuthEvents, type SessionRevocationReason } from './auth-events.js';
+import { type ActiveImpersonation, ImpersonationService } from './impersonation.service.js';
 import {
   LoginThrottleService,
   type LoginIdentifier,
@@ -34,6 +35,8 @@ export interface IssuedSession {
 export interface AuthenticatedRequest {
   claims: AccessTokenClaims & { expiresAt: Date };
   session: Session;
+  /** The "entrar como" behind a panel session (spec 02, section 7), or null. */
+  impersonation: ActiveImpersonation | null;
 }
 
 /** A subject that may log in, as loaded for a login. */
@@ -71,6 +74,7 @@ export class AuthService {
     private readonly passwordTokens: PasswordTokenService,
     private readonly audit: AuditService,
     private readonly events: AuthEvents,
+    private readonly impersonations: ImpersonationService,
   ) {}
 
   // ------------------------------------------------------------------------------------------
@@ -233,7 +237,15 @@ export class AuthService {
     ) {
       return null;
     }
-    return { claims, session };
+    if (session.impersonationId === null) {
+      return { claims, session, impersonation: null };
+    }
+    // An "entrar como" session stops when the admin ends it or it expires (CA-02.08).
+    const impersonation = await this.impersonations.findActive(session.impersonationId);
+    if (impersonation?.organizationId !== session.organizationId) {
+      return null;
+    }
+    return { claims, session, impersonation };
   }
 
   /** Rotates the refresh token (spec 01, section 7.2) and issues a new access token. */
@@ -242,7 +254,13 @@ export class AuthService {
     if (result.kind !== 'rotated') {
       throw AppError.of('UNAUTHENTICATED');
     }
-    const accessToken = await this.tokens.issue(area, this.claimsOf(result.session));
+    const accessToken = await this.tokens.issue(
+      area,
+      this.claimsOf(result.session),
+      new Date(),
+      // The access token of an "entrar como" never outlives it (CA-02.08).
+      result.session.impersonationId === null ? undefined : result.session.expiresAt,
+    );
     return { session: result.session, accessToken, refreshToken: result.refreshToken };
   }
 
@@ -271,7 +289,7 @@ export class AuthService {
       organizationId: found.organizationId,
     };
     this.actAs(subject, found.id);
-    const revoked = await this.platform.$transaction(async (tx) => {
+    const { revoked, impersonationEnded } = await this.platform.$transaction(async (tx) => {
       const ended = await this.sessions.revoke(tx, found, 'logout');
       if (ended) {
         await this.audit.record(tx, {
@@ -281,11 +299,20 @@ export class AuthService {
           organizationId: found.organizationId,
         });
       }
-      return ended;
+      // "Encerrar acesso" in the panel (RN-02.19) is the logout of the "entrar como" session: it
+      // ends the impersonation too.
+      const impersonation =
+        found.impersonationId === null
+          ? null
+          : await this.impersonations.end(tx, found.impersonationId, 'admin', new Date(), {
+              via: 'panel_logout',
+            });
+      return { revoked: ended, impersonationEnded: impersonation };
     });
     if (revoked) {
       this.notifyRevoked(subject, [found.id], 'logout');
     }
+    impersonationEnded?.notify();
   }
 
   // ------------------------------------------------------------------------------------------
@@ -303,6 +330,10 @@ export class AuthService {
     client: ClientInfo,
   ): Promise<IssuedSession> {
     const auth = this.requireAuth();
+    if (auth.impersonatorId) {
+      // The Varal team never changes the owner's password in an "entrar como" (spec 02, section 7).
+      throw authError('NOT_ALLOWED_DURING_IMPERSONATION');
+    }
     const subject: Subject = {
       subjectType: auth.actor.type as SubjectType,
       subjectId: auth.actor.id ?? '',

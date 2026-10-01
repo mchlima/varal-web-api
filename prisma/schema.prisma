@@ -105,6 +105,33 @@ enum IdempotencyStatus {
   @@map("idempotency_status")
 }
 
+/// Who receives an announcement (RN-02.14).
+enum AnnouncementAudienceType {
+  all
+  by_status
+  selected
+
+  @@map("announcement_audience_type")
+}
+
+/// Lifecycle of an announcement (RN-02.15).
+enum AnnouncementStatus {
+  draft
+  scheduled
+  published
+  archived
+
+  @@map("announcement_status")
+}
+
+/// How an "entrar como" session ended (spec 02, section 9).
+enum ImpersonationEndedBy {
+  admin
+  expired
+
+  @@map("impersonation_ended_by")
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tenants
 // ---------------------------------------------------------------------------------------------
@@ -121,16 +148,20 @@ model Organization {
   createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  units                Unit[]
-  users                User[]
-  staffMembers         StaffMember[]
-  staffUnitPermissions StaffUnitPermission[]
-  stations             Station[]
-  workflowStages       WorkflowStage[]
-  categories           Category[]
-  products             Product[]
-  modifierGroups       ModifierGroup[]
-  modifiers            Modifier[]
+  units                 Unit[]
+  users                 User[]
+  staffMembers          StaffMember[]
+  staffUnitPermissions  StaffUnitPermission[]
+  stations              Station[]
+  workflowStages        WorkflowStage[]
+  categories            Category[]
+  products              Product[]
+  modifierGroups        ModifierGroup[]
+  modifiers             Modifier[]
+  // Spec 02 (admin da plataforma).
+  announcementTargets   AnnouncementTarget[]
+  announcementReads     AnnouncementRead[]
+  impersonationSessions ImpersonationSession[]
 
   @@map("organizations")
 }
@@ -177,7 +208,10 @@ model User {
   createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id])
+  organization          Organization           @relation(fields: [organizationId], references: [id])
+  // Spec 02 (admin da plataforma).
+  announcementReads     AnnouncementRead[]
+  impersonationSessions ImpersonationSession[]
 
   @@index([organizationId])
   @@map("users")
@@ -382,7 +416,7 @@ model Modifier {
 // Platform
 // ---------------------------------------------------------------------------------------------
 
-/// Varal team members. Roles and permissions arrive with spec 02.
+/// Varal team members, with roles and extra permissions (RBAC, spec 02, section 3).
 /// SQL-only: CHECK email = lower(email).
 model PlatformAdmin {
   id           String    @id @default(uuid(7)) @db.Uuid
@@ -394,6 +428,11 @@ model PlatformAdmin {
   lastLoginAt  DateTime? @map("last_login_at") @db.Timestamptz(3)
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roles                 PlatformAdminRole[]
+  permissions           PlatformAdminPermission[]
+  announcements         Announcement[]
+  impersonationSessions ImpersonationSession[]
 
   @@map("platform_admins")
 }
@@ -424,14 +463,17 @@ model Session {
   lastUsedAt               DateTime?   @map("last_used_at") @db.Timestamptz(3)
   userAgent                String?     @map("user_agent")
   ip                       String?
-  /// "Entrar como" session (spec 02); no foreign key until that table exists.
+  /// "Entrar como" session (spec 02, RN-02.21): the session acts as the owner on behalf of an admin.
   impersonationId          String?     @map("impersonation_id") @db.Uuid
   createdAt                DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
+  impersonation ImpersonationSession? @relation(fields: [impersonationId], references: [id])
+
   @@index([subjectType, subjectId])
   @@index([organizationId])
   @@index([expiresAt])
+  @@index([impersonationId])
   @@map("sessions")
 }
 
@@ -475,24 +517,28 @@ model LoginThrottle {
 /// Insert-only (spec 01, section 8): no updated_at, and a trigger rejects UPDATE and DELETE.
 /// `organization_id` is null for platform-only actions.
 model AuditLog {
-  id             String    @id @default(uuid(7)) @db.Uuid
-  organizationId String?   @map("organization_id") @db.Uuid
-  actorType      ActorType @map("actor_type")
-  actorId        String?   @map("actor_id") @db.Uuid
-  impersonatorId String?   @map("impersonator_id") @db.Uuid
+  id              String    @id @default(uuid(7)) @db.Uuid
+  organizationId  String?   @map("organization_id") @db.Uuid
+  actorType       ActorType @map("actor_type")
+  actorId         String?   @map("actor_id") @db.Uuid
+  impersonatorId  String?   @map("impersonator_id") @db.Uuid
+  /// "Entrar como" session of the action (RN-02.20), with `impersonator_id`. No foreign key: the
+  /// audit outlives everything else.
+  impersonationId String?   @map("impersonation_id") @db.Uuid
   /// `<entity>.<verb>`, e.g. `tab.discount_applied`.
-  action         String
-  entityType     String    @map("entity_type")
-  entityId       String?   @map("entity_id") @db.Uuid
+  action          String
+  entityType      String    @map("entity_type")
+  entityId        String?   @map("entity_id") @db.Uuid
   /// `{ before: {...}, after: {...} }` with changed fields only.
-  changes        Json      @default("{}")
-  deviceId       String?   @map("device_id") @db.Uuid
-  ip             String?
-  requestId      String?   @map("request_id")
-  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  changes         Json      @default("{}")
+  deviceId        String?   @map("device_id") @db.Uuid
+  ip              String?
+  requestId       String?   @map("request_id")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([organizationId, createdAt])
   @@index([entityType, entityId])
+  @@index([createdAt])
   @@map("audit_logs")
 }
 
@@ -532,4 +578,160 @@ model IdempotencyKey {
   @@unique([subjectId, key])
   @@index([expiresAt])
   @@map("idempotency_keys")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Platform admin (spec 02)
+// ---------------------------------------------------------------------------------------------
+
+/// Groups of permissions (RN-02.02). System roles come from the migration (RN-02.04) and have a
+/// `system_key`; Super admin (`super_admin`) has every permission of the catalog, computed in code,
+/// so it has no `role_permissions` rows.
+model Role {
+  id          String   @id @default(uuid(7)) @db.Uuid
+  name        String   @unique
+  description String   @default("")
+  isSystem    Boolean  @default(false) @map("is_system")
+  /// `super_admin`, `support`, `finance`, `read_only` for system roles; null for custom ones.
+  systemKey   String?  @unique @map("system_key")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  permissions RolePermission[]
+  admins      PlatformAdminRole[]
+
+  @@map("roles")
+}
+
+/// Permission keys of a role (catalog in src/admin/rbac/permissions.ts, RN-02.03).
+model RolePermission {
+  id         String   @id @default(uuid(7)) @db.Uuid
+  roleId     String   @map("role_id") @db.Uuid
+  permission String
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@map("role_permissions")
+}
+
+model PlatformAdminRole {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  platformAdminId String   @map("platform_admin_id") @db.Uuid
+  roleId          String   @map("role_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  platformAdmin PlatformAdmin @relation(fields: [platformAdminId], references: [id])
+  role          Role          @relation(fields: [roleId], references: [id])
+
+  @@unique([platformAdminId, roleId])
+  @@index([roleId])
+  @@map("platform_admin_roles")
+}
+
+/// Extra permissions of one admin, added to those of the roles (RN-02.02).
+model PlatformAdminPermission {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  platformAdminId String   @map("platform_admin_id") @db.Uuid
+  permission      String
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  platformAdmin PlatformAdmin @relation(fields: [platformAdminId], references: [id])
+
+  @@unique([platformAdminId, permission])
+  @@map("platform_admin_permissions")
+}
+
+/// Announcements to owners (spec 02, section 5). Platform data: no `organization_id`.
+model Announcement {
+  id               String                   @id @default(uuid(7)) @db.Uuid
+  /// Up to 80 characters (RN-02.13).
+  title            String
+  /// Simple markdown, up to 2,000 characters (RN-02.13). Frozen once published (RN-02.15).
+  body             String
+  audienceType     AnnouncementAudienceType @map("audience_type")
+  /// Only for `by_status`.
+  audienceStatuses SubscriptionStatus[]     @default([]) @map("audience_statuses")
+  status           AnnouncementStatus       @default(draft)
+  /// When a scheduled announcement becomes visible.
+  publishAt        DateTime?                @map("publish_at") @db.Timestamptz(3)
+  publishedAt      DateTime?                @map("published_at") @db.Timestamptz(3)
+  archivedAt       DateTime?                @map("archived_at") @db.Timestamptz(3)
+  createdById      String                   @map("created_by") @db.Uuid
+  createdAt        DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  createdBy PlatformAdmin        @relation(fields: [createdById], references: [id])
+  targets   AnnouncementTarget[]
+  reads     AnnouncementRead[]
+
+  @@index([status, publishAt])
+  @@map("announcements")
+}
+
+/// Organizations chosen one by one (`selected` audience).
+model AnnouncementTarget {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  announcementId String   @map("announcement_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  announcement Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id])
+
+  @@unique([announcementId, organizationId])
+  @@index([organizationId])
+  @@map("announcement_targets")
+}
+
+/// One read per owner (RN-02.16). Tenant data: has the organization of the owner.
+model AnnouncementRead {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  announcementId String   @map("announcement_id") @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  readAt         DateTime @default(now()) @map("read_at") @db.Timestamptz(3)
+
+  announcement Announcement @relation(fields: [announcementId], references: [id])
+  organization Organization @relation(fields: [organizationId], references: [id])
+  user         User         @relation(fields: [userId], references: [id])
+
+  @@unique([announcementId, userId])
+  @@index([organizationId, announcementId])
+  @@map("announcement_reads")
+}
+
+/// "Entrar como" (spec 02, section 7). Tenant data: the owner lists the support accesses of the
+/// organization (RN-02.22). The admin opens the panel with a one-time handoff token (only its hash is
+/// stored), exchanged by the panel for a session cookie of the customers' app (RN-02.21).
+model ImpersonationSession {
+  id               String                @id @default(uuid(7)) @db.Uuid
+  organizationId   String                @map("organization_id") @db.Uuid
+  platformAdminId  String                @map("platform_admin_id") @db.Uuid
+  /// The owner the admin acts as (RN-02.18).
+  ownerId          String                @map("owner_id") @db.Uuid
+  /// At least 10 characters (RN-02.17).
+  reason           String
+  startedAt        DateTime              @map("started_at") @db.Timestamptz(3)
+  /// started_at + 60 minutes (RN-02.17, CA-02.08).
+  expiresAt        DateTime              @map("expires_at") @db.Timestamptz(3)
+  endedAt          DateTime?             @map("ended_at") @db.Timestamptz(3)
+  endedBy          ImpersonationEndedBy? @map("ended_by")
+  /// SHA-256 of the one-time handoff token; null once used.
+  handoffTokenHash String?               @unique @map("handoff_token_hash")
+  handoffExpiresAt DateTime?             @map("handoff_expires_at") @db.Timestamptz(3)
+  handoffUsedAt    DateTime?             @map("handoff_used_at") @db.Timestamptz(3)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization  Organization  @relation(fields: [organizationId], references: [id])
+  platformAdmin PlatformAdmin @relation(fields: [platformAdminId], references: [id])
+  owner         User          @relation(fields: [ownerId], references: [id])
+  sessions      Session[]
+
+  @@index([organizationId, startedAt])
+  @@index([platformAdminId])
+  @@index([expiresAt])
+  @@map("impersonation_sessions")
 }

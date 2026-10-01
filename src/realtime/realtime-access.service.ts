@@ -93,7 +93,8 @@ export class RealtimeAccessService {
         auth: {
           organizationId: session.organizationId,
           actor: { type: session.subjectType, id: session.subjectId },
-          impersonatorId: null,
+          impersonatorId: session.impersonatorId,
+          impersonationId: session.impersonationId,
           sessionId: session.sessionId,
         },
       }),

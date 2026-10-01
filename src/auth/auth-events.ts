@@ -18,6 +18,8 @@ export const SESSION_REVOCATION_REASONS = [
   /** The owner removed every unit of the staff member (RN-03.16: without a unit there is no login). */
   'staff_access_removed',
   'subject_deactivated',
+  /** The "entrar como" session ended: by the admin, by logout in the panel or expired (spec 02). */
+  'impersonation_ended',
 ] as const;
 
 export type SessionRevocationReason = (typeof SESSION_REVOCATION_REASONS)[number];

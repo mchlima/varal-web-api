@@ -23,6 +23,8 @@ export interface AuthContext {
   organizationId: string | null;
   actor: Actor;
   impersonatorId?: string | null;
+  /** "Entrar como" session (`impersonation_sessions.id`) when `impersonatorId` is set (RN-02.20). */
+  impersonationId?: string | null;
   /** Session of the logged-in subject (`sessions.id`), set by the authentication guard. */
   sessionId?: string | null;
 }

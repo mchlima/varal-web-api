@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 
+import { loadAdminAccess } from '../admin/rbac/admin-access.js';
 import { getRequestContext } from '../context/request-context.js';
 import { AppError } from '../errors/app-error.js';
 import type { Session } from '../generated/prisma/client.js';
@@ -37,7 +38,9 @@ export class ProfileService {
       name: organization.name,
       accessCode: organization.accessCode,
       subscriptionStatus: organization.subscriptionStatus,
+      suspendedReason: organization.suspendedReason,
     };
+    const impersonation = await this.impersonationOf(session);
 
     if (auth.actor.type === 'owner') {
       const owner = await db.user.findUnique({ where: { id: auth.actor.id } });
@@ -68,6 +71,7 @@ export class ProfileService {
           lateAfterMinutes: unit.lateAfterMinutes,
         })),
         session: sessionInfo,
+        impersonation,
       };
     }
 
@@ -108,18 +112,46 @@ export class ProfileService {
         };
       }),
       session: sessionInfo,
+      impersonation,
     };
+  }
+
+  /** Banner of an "entrar como" (RN-02.19): who is acting, until when. */
+  private async impersonationOf(session: Session): Promise<PanelMe['impersonation']> {
+    if (session.impersonationId === null) {
+      return null;
+    }
+    const row = await this.platform.impersonationSession.findUnique({
+      where: { id: session.impersonationId },
+      select: {
+        id: true,
+        startedAt: true,
+        expiresAt: true,
+        platformAdmin: { select: { name: true } },
+      },
+    });
+    return row
+      ? {
+          id: row.id,
+          adminName: row.platformAdmin.name,
+          startedAt: row.startedAt.toISOString(),
+          expiresAt: row.expiresAt.toISOString(),
+        }
+      : null;
   }
 
   async adminMe(session: Session, accessTokenExpiresAt: Date): Promise<AdminMe> {
     const admin = await this.platform.platformAdmin.findUnique({
       where: { id: session.subjectId },
     });
-    if (!admin?.active) {
+    const access = await loadAdminAccess(this.platform, session.subjectId);
+    if (!admin?.active || !access) {
       throw AppError.of('UNAUTHENTICATED');
     }
     return {
       admin: { id: admin.id, name: admin.name, email: admin.email },
+      roles: access.roles,
+      permissions: access.permissions,
       session: sessionInfoOf({ session, accessTokenExpiresAt }),
     };
   }

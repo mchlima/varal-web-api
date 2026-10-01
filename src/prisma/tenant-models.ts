@@ -22,6 +22,10 @@ export const TENANT_MODELS = {
   Product: 'organizationId',
   ModifierGroup: 'organizationId',
   Modifier: 'organizationId',
+  // Spec 02: what the owner reads in the panel (banner reads, support accesses).
+  AnnouncementTarget: 'organizationId',
+  AnnouncementRead: 'organizationId',
+  ImpersonationSession: 'organizationId',
 } as const satisfies Partial<Record<Prisma.ModelName, string>>;
 
 export type TenantModel = keyof typeof TENANT_MODELS;

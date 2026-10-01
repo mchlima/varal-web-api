@@ -34,6 +34,17 @@ export const AUTH_ERRORS = {
     status: 403,
     message: 'Você ainda não tem acesso a nenhuma unidade. Fale com o responsável pela barraca.',
   },
+  /** "Entrar como" (spec 02, section 7): the one-time link was used, expired or is not yours. */
+  INVALID_IMPERSONATION_TOKEN: {
+    status: 400,
+    message:
+      'Este link de acesso de suporte é inválido, já foi usado ou expirou. Gere outro no admin.',
+  },
+  /** Actions of the owner's own account that the Varal team never does in an "entrar como". */
+  NOT_ALLOWED_DURING_IMPERSONATION: {
+    status: 403,
+    message: 'Esta ação não está disponível durante um acesso de suporte.',
+  },
   DEVICE_ID_REQUIRED: {
     status: 400,
     message: 'O identificador do aparelho (X-Device-Id) é obrigatório para entrar.',

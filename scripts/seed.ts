@@ -8,11 +8,13 @@
  *   "Retirar") and drinks routed to the delivery counter (RN-03.08).
  * - Owner dono@varal.local; staff members `ana` (Balcão and Balcão de entrega, operates cash) and
  *   `bruno` (Cozinha).
- * - Platform admin admin@varal.local.
+ * - Platform admin admin@varal.local, with the Super admin role (spec 02, RN-02.05). The system roles
+ *   come from the migration; the seed only creates any that are missing (never changes them).
  * - DEVELOPMENT ONLY password `varal12345` for the owner, both staff members and the admin. It is set
  *   only while the password is empty, so a password changed locally survives a new seed. The script
  *   refuses to run with NODE_ENV=production.
  */
+import { SUPER_ADMIN_KEY, SYSTEM_ROLE_KEYS, SYSTEM_ROLES } from '../src/admin/rbac/permissions.js';
 import { AuditService } from '../src/audit/audit.service.js';
 import { hashPassword } from '../src/auth/password-hasher.js';
 import type { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
@@ -216,6 +218,31 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
     await tx.platformAdmin.updateMany({
       where: { id: platformAdmin.id, passwordHash: null },
       data: { passwordHash },
+    });
+
+    // System roles of spec 02 (normally created by the migration): create the missing ones only.
+    for (const key of SYSTEM_ROLE_KEYS) {
+      const definition = SYSTEM_ROLES[key];
+      const existing = await tx.role.findUnique({ where: { systemKey: key } });
+      if (existing) {
+        continue;
+      }
+      const role = await tx.role.create({
+        data: { name: definition.name, isSystem: true, systemKey: key },
+      });
+      if (definition.permissions !== 'all') {
+        await tx.rolePermission.createMany({
+          data: definition.permissions.map((permission) => ({ roleId: role.id, permission })),
+        });
+      }
+    }
+    const superAdmin = await tx.role.findUniqueOrThrow({ where: { systemKey: SUPER_ADMIN_KEY } });
+    await tx.platformAdminRole.upsert({
+      where: {
+        platformAdminId_roleId: { platformAdminId: platformAdmin.id, roleId: superAdmin.id },
+      },
+      create: { platformAdminId: platformAdmin.id, roleId: superAdmin.id },
+      update: {},
     });
 
     return {

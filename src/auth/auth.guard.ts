@@ -68,7 +68,7 @@ export class AuthGuard implements CanActivate {
     if (!authenticated) {
       throw AppError.of('UNAUTHENTICATED');
     }
-    const { session } = authenticated;
+    const { session, impersonation } = authenticated;
     const requestContext = getRequestContext();
     if (requestContext?.deviceId && requestContext.deviceId !== session.deviceId) {
       throw AppError.of('UNAUTHENTICATED');
@@ -77,8 +77,9 @@ export class AuthGuard implements CanActivate {
     setAuthContext({
       organizationId: session.organizationId,
       actor: { type: session.subjectType, id: session.subjectId },
-      // "Entrar como" (spec 02) fills it from sessions.impersonation_id.
-      impersonatorId: null,
+      // "Entrar como" (RN-02.20): the actor is the owner, on behalf of this admin.
+      impersonatorId: impersonation?.platformAdminId ?? null,
+      impersonationId: impersonation?.id ?? null,
       sessionId: session.id,
     });
     return true;
