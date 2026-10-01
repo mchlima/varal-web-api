@@ -116,7 +116,7 @@ export class ProfileService {
     };
   }
 
-  /** Banner of an "entrar como" (RN-02.19): who is acting, until when. */
+  /** Banner of an "entrar como" (RN-02.19): who is acting; no deadline (RN-02.17). */
   private async impersonationOf(session: Session): Promise<PanelMe['impersonation']> {
     if (session.impersonationId === null) {
       return null;
@@ -126,7 +126,6 @@ export class ProfileService {
       select: {
         id: true,
         startedAt: true,
-        expiresAt: true,
         platformAdmin: { select: { name: true } },
       },
     });
@@ -135,7 +134,7 @@ export class ProfileService {
           id: row.id,
           adminName: row.platformAdmin.name,
           startedAt: row.startedAt.toISOString(),
-          expiresAt: row.expiresAt.toISOString(),
+          expiresAt: null,
         }
       : null;
   }

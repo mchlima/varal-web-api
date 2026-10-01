@@ -26,7 +26,7 @@ const databaseUrl = inject('databaseUrl');
 const API = '/api/v1';
 
 interface Started {
-  impersonation: { id: string; expiresAt: string; active: boolean };
+  impersonation: { id: string; expiresAt: string | null; reason: string | null; active: boolean };
   handoffUrl: string;
 }
 
@@ -72,12 +72,10 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     vi.unstubAllEnvs();
   });
 
+  /** RN-02.17: only the organization; no reason is asked. */
   async function start(admin = support, organizationId = tenant.organizationId): Promise<Started> {
     const response = await admin
-      .call('post', `${API}/admin/impersonations`, {
-        organizationId,
-        reason: 'Ajuda para cadastrar o cardápio',
-      })
+      .call('post', `${API}/admin/impersonations`, { organizationId })
       .expect(201);
     return response.body as Started;
   }
@@ -109,15 +107,13 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
 
   it('opens a panel session as the owner, with the banner data (RN-02.18, RN-02.19, RN-02.21)', async () => {
     const started = await start();
-    expect(started.impersonation.active).toBe(true);
-    expect(new Date(started.impersonation.expiresAt).getTime() - Date.now()).toBeLessThanOrEqual(
-      60 * 60 * 1000,
-    );
+    // RN-02.17: no reason and no deadline.
+    expect(started.impersonation).toMatchObject({ active: true, reason: null, expiresAt: null });
     const tab = await openPanel(started);
     expect(tab.body).toMatchObject({
       subject: { type: 'owner', id: tenant.ownerId },
       organization: { id: tenant.organizationId },
-      impersonation: { id: started.impersonation.id, adminName: support.name },
+      impersonation: { id: started.impersonation.id, adminName: support.name, expiresAt: null },
     });
     const me = await asPanel(tab, 'get', `${API}/auth/me`).expect(200);
     expect(me.body).toMatchObject({ impersonation: { id: started.impersonation.id } });
@@ -217,55 +213,55 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     expect(ownRow).toMatchObject({ impersonatorId: null, impersonationId: null });
   });
 
-  it('CA-02.08: the session expires in 60 minutes; then that cookie is refused and refresh does not extend it', async () => {
+  it('CA-02.08: no deadline; the session is renewed normally and refused once the admin ends it', async () => {
     const started = await start();
     const tab = await openPanel(started);
     const session = await platform.session.findFirstOrThrow({
       where: { impersonationId: started.impersonation.id },
     });
-    expect(session.expiresAt.toISOString()).toBe(started.impersonation.expiresAt);
-    // Refresh keeps the end of the impersonation.
+    // Normal session rules (spec 01): 30 days, renewed by the refresh.
+    expect(session.expiresAt.getTime() - Date.now()).toBeGreaterThan(24 * 60 * 60 * 1000);
     const refreshed = await http()
       .post(`${API}/auth/refresh`)
       .set('Cookie', tab.jar.header())
       .set('X-Device-Id', tab.deviceId)
       .expect(200);
     tab.jar.store(refreshed);
-    expect(refreshed.body).toMatchObject({ expiresAt: started.impersonation.expiresAt });
     const refreshCookie = parseSetCookies(refreshed).find(
       (cookie) => cookie.name === AUTH_COOKIES.panel.refresh,
     );
-    expect(Number(refreshCookie?.attributes['max-age'])).toBeLessThanOrEqual(60 * 60);
+    expect(Number(refreshCookie?.attributes['max-age'])).toBeGreaterThan(24 * 60 * 60);
 
-    // 60 minutes later.
-    const past = new Date(Date.now() - 1_000);
+    // Hours later, the job does not end it: there is no deadline (RN-02.17).
     await platform.impersonationSession.update({
       where: { id: started.impersonation.id },
-      data: { startedAt: new Date(past.getTime() - 60 * 60 * 1000), expiresAt: past },
+      data: { startedAt: new Date(Date.now() - 5 * 60 * 60 * 1000) },
     });
-    await platform.session.update({ where: { id: session.id }, data: { expiresAt: past } });
+    await app.get(AdminTasksJob).run();
+    await expect(
+      platform.impersonationSession.findUniqueOrThrow({ where: { id: started.impersonation.id } }),
+    ).resolves.toMatchObject({ endedAt: null, endedBy: null, expiresAt: null });
+    await asPanel(tab, 'get', `${API}/auth/me`).expect(200);
+
+    // The admin ends it: from then on that cookie is refused, and refresh too.
+    await support
+      .call('post', `${API}/admin/impersonations/${started.impersonation.id}/end`)
+      .expect(200);
     await asPanel(tab, 'get', `${API}/auth/me`).expect(401);
     await http()
       .post(`${API}/auth/refresh`)
       .set('Cookie', tab.jar.header())
       .set('X-Device-Id', tab.deviceId)
       .expect(401);
-
-    // The job records the end for the owner's list.
-    const result = await app.get(AdminTasksJob).run();
-    expect(result.impersonationsExpired).toBeGreaterThanOrEqual(1);
-    await expect(
-      platform.impersonationSession.findUniqueOrThrow({ where: { id: started.impersonation.id } }),
-    ).resolves.toMatchObject({ endedBy: 'expired', endedAt: past });
   });
 
-  it('the access token never outlives the impersonation, even if the session row did', async () => {
+  it('the access token stops as soon as the impersonation ends, even if the session row did not', async () => {
     const started = await start();
     const tab = await openPanel(started);
-    // The impersonation ends (expires) while the session row would still be valid.
+    // The impersonation ends while the session row would still be valid.
     await platform.impersonationSession.update({
       where: { id: started.impersonation.id },
-      data: { expiresAt: new Date(Date.now() - 60 * 60_000) },
+      data: { endedAt: new Date(), endedBy: 'admin' },
     });
     await asPanel(tab, 'get', `${API}/auth/me`).expect(401);
   });
@@ -340,7 +336,13 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     ).resolves.toBe(0);
   });
 
-  it('CA-02.09: the owner sees the support accesses with admin, reason and times (RN-02.22)', async () => {
+  it('CA-02.09: the owner sees the support accesses with admin and times; the reason only if any (RN-02.22)', async () => {
+    const withReason = await support
+      .call('post', `${API}/admin/impersonations`, {
+        organizationId: tenant.organizationId,
+        reason: 'Ajuda para cadastrar o cardápio',
+      })
+      .expect(201);
     const started = await start();
     await openPanel(started);
     const owner = await loginOwner(app, (await credentialsOf(platform, tenant)).email);
@@ -353,10 +355,14 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     expect(items[0]).toMatchObject({
       id: started.impersonation.id,
       adminName: support.name,
-      reason: 'Ajuda para cadastrar o cardápio',
+      reason: null,
       startedAt: expect.any(String) as string,
       endedAt: null,
       active: true,
+    });
+    expect(items[1]).toMatchObject({
+      id: (withReason.body as Started).impersonation.id,
+      reason: 'Ajuda para cadastrar o cardápio',
     });
     // Another organization never sees them (CA-01.02).
     const other = await loginOwner(app, (await credentialsOf(platform, otherTenant)).email);
@@ -383,7 +389,7 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
       .expect(403);
   });
 
-  it('requires an organization with an active owner and a reason of at least 10 characters', async () => {
+  it('requires an organization with an active owner; a reason, optional, has at least 10 characters', async () => {
     const short = await support
       .call('post', `${API}/admin/impersonations`, {
         organizationId: tenant.organizationId,
@@ -394,7 +400,6 @@ describe.skipIf(!databaseUrl)('"entrar como" (spec 02, section 7)', () => {
     await support
       .call('post', `${API}/admin/impersonations`, {
         organizationId: crypto.randomUUID(),
-        reason: 'Motivo comprido o bastante',
       })
       .expect(404);
   });

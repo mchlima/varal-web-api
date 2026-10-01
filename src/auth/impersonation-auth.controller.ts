@@ -51,7 +51,7 @@ export class ImpersonationAuthController {
   @ApiOperation({
     summary: 'Troca o link de uso único do "entrar como" pela sessão do app (RN-02.21)',
     description:
-      'Chamado pela página `/entrar-como` do painel com o token do fragmento. Exige o cookie de sessão do admin que gerou o link (mesmo navegador) e o `X-Device-Id` do painel. A sessão aberta é do dono, dura até o fim do "entrar como" (60 min, CA-02.08) e não dá acesso a outras organizações nem ao admin.',
+      'Chamado pela página `/entrar-como` do painel com o token do fragmento. Exige o cookie de sessão do admin que gerou o link (mesmo navegador) e o `X-Device-Id` do painel. A sessão aberta é do dono, segue as regras normais de renovação e termina na hora em que o "entrar como" é encerrado (CA-02.08) e não dá acesso a outras organizações nem ao admin.',
   })
   @ApiHeader(DEVICE_HEADER_DOC)
   @ApiOkResponse({

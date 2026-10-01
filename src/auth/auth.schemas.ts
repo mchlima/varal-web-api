@@ -102,7 +102,11 @@ export const PanelImpersonationSchema = z
     id: z.uuid(),
     adminName: z.string(),
     startedAt: z.iso.datetime(),
-    expiresAt: z.iso.datetime(),
+    expiresAt: z.iso.datetime().nullable().meta({
+      deprecated: true,
+      description:
+        'Sempre `null`: o "entrar como" não tem prazo e dura até o admin encerrar (RN-02.17).',
+    }),
   })
   .meta({
     id: 'PanelImpersonation',
