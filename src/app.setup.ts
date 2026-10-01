@@ -7,6 +7,7 @@ import type { Env } from './config/env.js';
 import { REQUEST_ID_HEADER } from './context/request-context.middleware.js';
 import { configureZodLocale, validationError } from './errors/validation.js';
 import { IDEMPOTENT_REPLAYED_HEADER } from './idempotency/idempotency.constants.js';
+import { RealtimeIoAdapter } from './realtime/realtime-io.adapter.js';
 
 export const API_PREFIX = 'api/v1';
 
@@ -37,6 +38,8 @@ export function configureApp(app: NestExpressApplication): NestExpressApplicatio
   // Validates params declared with `schema` (zod 4 via Standard Schema); failures become
   // VALIDATION_FAILED with one entry per field (spec 01, section 5).
   app.useGlobalPipes(new StandardSchemaValidationPipe({ exceptionFactory: validationError }));
+  // Socket.IO at /ws with the same exact origins (RN-01.20; spec 01, section 10).
+  app.useWebSocketAdapter(new RealtimeIoAdapter(app, env.CORS_ORIGINS));
   app.enableShutdownHooks();
 
   return app;

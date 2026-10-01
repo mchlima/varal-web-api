@@ -4,15 +4,21 @@ import { Injectable, Logger } from '@nestjs/common';
 
 import type { SubjectType } from '../generated/prisma/enums.js';
 
-/** Why sessions were ended. Stored in `sessions.revoked_reason` and in the audit log. */
-export type SessionRevocationReason =
-  | 'logout'
-  | 'password_changed'
-  | 'password_reset'
-  | 'refresh_token_reused'
-  | 'new_login_on_device'
-  | 'staff_deactivated'
-  | 'subject_deactivated';
+/**
+ * Why sessions were ended. Stored in `sessions.revoked_reason` and in the audit log, and sent to the
+ * app in the real-time event `session.revoked` (`EventSessionRevoked`).
+ */
+export const SESSION_REVOCATION_REASONS = [
+  'logout',
+  'password_changed',
+  'password_reset',
+  'refresh_token_reused',
+  'new_login_on_device',
+  'staff_deactivated',
+  'subject_deactivated',
+] as const;
+
+export type SessionRevocationReason = (typeof SESSION_REVOCATION_REASONS)[number];
 
 /** Internal event `auth.sessions_revoked`, emitted after the revocation committed. */
 export interface SessionsRevokedEvent {
@@ -27,8 +33,8 @@ export const SESSIONS_REVOKED = 'auth.sessions_revoked';
 /**
  * In-process events of the authentication.
  *
- * Integration point of phase 1c: the realtime gateway subscribes to {@link SESSIONS_REVOKED} and
- * disconnects the sockets of those sessions right away (CA-01.05: "desconecta o WebSocket na hora").
+ * The real-time module (src/realtime) subscribes to {@link SESSIONS_REVOKED} and disconnects the
+ * sockets of those sessions right away (CA-01.05: "o WebSocket é desconectado").
  * HTTP requests already stop working at once, because the guard checks the session on every request.
  */
 @Injectable()

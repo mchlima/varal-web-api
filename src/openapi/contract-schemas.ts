@@ -7,6 +7,7 @@ import {
   ErrorResponseSchema,
   ValidationErrorDetailsSchema,
 } from '../errors/error-response.schema.js';
+import { realtimeContractSchemas } from '../realtime/realtime.contracts.js';
 import {
   ActorTypeSchema,
   EmailStatusSchema,
@@ -14,13 +15,7 @@ import {
   SubscriptionStatusSchema,
 } from './enum-schemas.js';
 
-/**
- * Names a real-time event payload schema. Events are published in `components.schemas`
- * with the `Event` prefix, e.g. `EventOrderCreated` (RN-01.10).
- */
-export function defineEvent<T extends z.ZodType>(id: `Event${string}`, schema: T): T {
-  return schema.meta({ id });
-}
+export { defineEvent } from './define-event.js';
 
 /**
  * Schemas that must appear in `components.schemas` even when no route references them:
@@ -38,4 +33,5 @@ export const contractSchemas: readonly z.ZodType[] = [
   EmailTypeSchema,
   EmailStatusSchema,
   AuthErrorCodeSchema,
+  ...realtimeContractSchemas,
 ];

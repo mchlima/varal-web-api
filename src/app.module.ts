@@ -12,6 +12,7 @@ import { HealthModule } from './health/health.module.js';
 import { IdempotencyModule } from './idempotency/idempotency.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { RealtimeModule } from './realtime/realtime.module.js';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     EmailModule,
     AuthModule,
     AdminModule,
+    RealtimeModule,
     HealthModule,
   ],
   providers: [{ provide: APP_FILTER, useClass: AllExceptionsFilter }],

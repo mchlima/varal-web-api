@@ -245,6 +245,75 @@
         ],
         "type": "object"
       },
+      "EventSessionExpired": {
+        "additionalProperties": false,
+        "description": "O token de acesso usado na conexão venceu. O servidor desconecta o socket logo depois; o app renova a sessão por REST (`POST /auth/refresh`) e reconecta.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "expiredAt": {
+                "description": "Fim do token de acesso do socket.",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "expiredAt"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.expired",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "occurredAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventSessionRevoked": {
+        "additionalProperties": false,
+        "description": "A sessão foi encerrada (logout, troca ou redefinição de senha, desativação, novo login no aparelho). O servidor desconecta o socket logo depois; o app volta para o login (CA-01.05).",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "$ref": "#/components/schemas/SessionRevocationReason"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "type": {
+            "const": "session.revoked",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "occurredAt",
+          "data"
+        ],
+        "type": "object"
+      },
       "ForgotPasswordRequestInput": {
         "properties": {
           "email": {
@@ -457,6 +526,98 @@
         ],
         "type": "object"
       },
+      "RealtimeErrorCode": {
+        "description": "Códigos de erro do tempo real (`/ws`): em `connect_error` (`err.data`, um `ErrorResponse`) e na resposta de `rooms.join`/`rooms.leave`.",
+        "enum": [
+          "UNAUTHENTICATED",
+          "DEVICE_ID_REQUIRED",
+          "ROOM_FORBIDDEN",
+          "VALIDATION_FAILED",
+          "INTERNAL_ERROR"
+        ],
+        "type": "string"
+      },
+      "RealtimeRoomAck": {
+        "description": "Resposta (callback) de `rooms.join` e `rooms.leave`.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "ok": {
+                "const": true,
+                "type": "boolean"
+              },
+              "rooms": {
+                "description": "Salas `unit:` e `station:` em que o aparelho está agora.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "ok",
+              "rooms"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "error": {
+                "additionalProperties": false,
+                "properties": {
+                  "code": {
+                    "$ref": "#/components/schemas/RealtimeErrorCode"
+                  },
+                  "details": {
+                    "additionalProperties": {},
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "message": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "code",
+                  "message",
+                  "details"
+                ],
+                "type": "object"
+              },
+              "ok": {
+                "const": false,
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "ok",
+              "error"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "RealtimeRoomRequest": {
+        "additionalProperties": false,
+        "description": "Corpo de `rooms.join` e `rooms.leave` (cliente → servidor, com callback de confirmação).",
+        "properties": {
+          "room": {
+            "description": "Sala `unit:{unitId}` ou `station:{stationId}`.",
+            "examples": [
+              "station:01922f2c-7a3b-7c00-8000-0000000000e1"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "room"
+        ],
+        "type": "object"
+      },
       "ResetPasswordRequestInput": {
         "properties": {
           "password": {
@@ -510,6 +671,19 @@
           "expiresAt"
         ],
         "type": "object"
+      },
+      "SessionRevocationReason": {
+        "description": "Por que a sessão foi encerrada.",
+        "enum": [
+          "logout",
+          "password_changed",
+          "password_reset",
+          "refresh_token_reused",
+          "new_login_on_device",
+          "staff_deactivated",
+          "subject_deactivated"
+        ],
+        "type": "string"
       },
       "StaffLoginRequestInput": {
         "properties": {
@@ -599,7 +773,7 @@
   },
   "info": {
     "contact": {},
-    "description": "REST API do Varal (`/api/v1`). Contrato consumido pelos apps (spec 01, seção 3.1).",
+    "description": "REST API do Varal (`/api/v1`) e tempo real (Socket.IO em `/ws`, payloads `Event…` e `Realtime…` em `components.schemas`). Contrato consumido pelos apps (spec 01, seção 3.1).",
     "title": "Varal API",
     "version": "0.0.0"
   },
