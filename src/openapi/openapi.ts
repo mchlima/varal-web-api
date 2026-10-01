@@ -5,6 +5,7 @@ import type { INestApplication } from '@nestjs/common';
 import { DocumentBuilder, type OpenAPIObject, SwaggerModule } from '@nestjs/swagger';
 import type { z } from 'zod';
 
+import { ErrorResponseSchema } from '../errors/error-response.schema.js';
 import { contractSchemas } from './contract-schemas.js';
 import { toComponentSchemas, zodOpenApiConverter } from './zod-openapi.converter.js';
 
@@ -33,6 +34,29 @@ export function mergeContractSchemas(
         throw new Error(`OpenAPI schema "${id}" is defined twice with different shapes`);
       }
       target[id] = definition;
+    }
+  }
+  return document;
+}
+
+const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'] as const;
+
+/**
+ * Every operation documents the error envelope of spec 01, section 5 as its `default` response,
+ * so the apps get a typed `error` for any non-success status.
+ */
+export function addDefaultErrorResponses(document: OpenAPIObject): OpenAPIObject {
+  for (const pathItem of Object.values(document.paths)) {
+    for (const method of HTTP_METHODS) {
+      const operation = pathItem[method];
+      if (operation && !('default' in operation.responses)) {
+        operation.responses.default = {
+          description: 'Erro no formato `ErrorResponse` (spec 01, seção 5).',
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/ErrorResponse' } },
+          },
+        };
+      }
     }
   }
   return document;
@@ -70,7 +94,9 @@ export function buildOpenApiDocument(
   const document = SwaggerModule.createDocument(app, config, {
     standardSchemaConverter: zodOpenApiConverter,
   });
-  return sortKeysDeep(mergeContractSchemas(document, extraSchemas));
+  // ErrorResponse always ships: every operation references it (addDefaultErrorResponses).
+  const schemas = [ErrorResponseSchema, ...extraSchemas];
+  return sortKeysDeep(addDefaultErrorResponses(mergeContractSchemas(document, schemas)));
 }
 
 export function serializeOpenApiDocument(document: OpenAPIObject): string {
