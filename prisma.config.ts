@@ -7,6 +7,9 @@ if (process.env.NODE_ENV !== 'production') {
   config({ path: ['.env.local', '.env'], quiet: true });
 }
 
+// The npm `latest` tag of the CLI points to Prisma 8 RC; this project pins 7.10.0 (plan, section 5).
+process.env.PRISMA_HIDE_UPDATE_MESSAGE ??= '1';
+
 export default defineConfig({
   schema: 'prisma/schema.prisma',
   migrations: {
