@@ -1,0 +1,62 @@
+name: deploy
+
+# Publica uma versão da API no VPS: chamado pelo release-please depois do merge do PR de
+# release, ou à mão (Actions → deploy → Run workflow) para repetir ou voltar uma versão.
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Versão (tag vX.Y.Z)
+        required: true
+        type: string
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: API ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.version }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Construir a imagem
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: varal-web-api:${{ inputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Preparar a chave de deploy
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf "%s\n" "$DEPLOY_SSH_KEY" > ~/.ssh/deploy && chmod 600 ~/.ssh/deploy
+          printf "%s\n" "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Enviar e publicar no VPS
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          docker save "varal-web-api:$VERSION" | gzip -1 \
+            | ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes "deploy@$DEPLOY_HOST" api "$VERSION"
+          ssh -i ~/.ssh/deploy -o IdentitiesOnly=yes -o BatchMode=yes "deploy@$DEPLOY_HOST" status
