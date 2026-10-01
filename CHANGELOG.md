@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/mchlima/varal-web-api/compare/v0.4.0...v0.5.0) (2026-10-01)
+
+
+### Features
+
+* **credit:** implementa clientes, pendurar e quitação do fiado (fase 6) ([#27](https://github.com/mchlima/varal-web-api/issues/27)) ([bf92d30](https://github.com/mchlima/varal-web-api/commit/bf92d30f38fe493cc27bac0fb1b8369390231f1c))
+
 ## [0.4.0](https://github.com/mchlima/varal-web-api/compare/v0.3.0...v0.4.0) (2026-10-01)
 
 
