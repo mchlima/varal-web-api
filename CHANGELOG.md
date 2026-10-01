@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/mchlima/varal-web-api/compare/v0.1.0...v0.2.0) (2026-10-01)
+
+
+### Features
+
+* **admin:** implementa o admin da plataforma (fase 3) ([#18](https://github.com/mchlima/varal-web-api/issues/18)) ([f1a3185](https://github.com/mchlima/varal-web-api/commit/f1a3185147b5fdd0dc8d28222aed8be739ffeb0b))
+
+
+### Bug Fixes
+
+* **openapi:** publica limit, cursor e filtros das rotas paginadas ([#20](https://github.com/mchlima/varal-web-api/issues/20)) ([37908d4](https://github.com/mchlima/varal-web-api/commit/37908d42fadea3fad9de86954e3587ef5d907321))
+
 ## 0.1.0 (2026-10-01)
 
 
