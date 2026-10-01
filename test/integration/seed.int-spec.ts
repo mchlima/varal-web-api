@@ -3,7 +3,7 @@ import { afterAll, describe, expect, inject, it } from 'vitest';
 import { verifyPassword } from '../../src/auth/password-hasher.js';
 import type { Env } from '../../src/config/env.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { SEED, SEED_MENU, seed } from '../../scripts/seed.js';
+import { SEED, SEED_MENU, SEED_TABS, seed } from '../../scripts/seed.js';
 
 const databaseUrl = inject('databaseUrl');
 
@@ -87,6 +87,28 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     ).toEqual({ ana: ['Balcão', 'Balcão de entrega'], bruno: ['Cozinha'] });
   });
 
+  it('spec 04: an open shift with example tabs and items in different stages', async () => {
+    const result = await seed(platform);
+    const shifts = await platform.shift.findMany({ where: { unitId: result.unitId } });
+    expect(shifts).toHaveLength(1);
+    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 1 });
+    const tabs = await platform.tab.findMany({
+      where: { shiftId: shifts[0]?.id },
+      orderBy: { number: 'asc' },
+      include: { items: { include: { stage: true } } },
+    });
+    expect(tabs.map((tab) => [tab.number, tab.customerName, tab.status])).toEqual(
+      SEED_TABS.map((tab, index) => [index + 1, tab.customerName, tab.status]),
+    );
+    const stageNames = new Set(tabs.flatMap((tab) => tab.items.map((item) => item.stage.name)));
+    expect([...stageNames].sort()).toEqual(['Entregue', 'Preparando', 'Pronto', 'Recebido']);
+    expect(tabs.flatMap((tab) => tab.items).some((item) => item.splitFromId !== null)).toBe(true);
+    // Final items are in no queue.
+    for (const item of tabs.flatMap((tab) => tab.items)) {
+      expect(item.stationId === null).toBe(item.stage.isFinal);
+    }
+  });
+
   it('sets the development password of the owner, the staff and the admin (only while empty)', async () => {
     const result = await seed(platform);
     const owner = await platform.user.findUniqueOrThrow({ where: { id: result.ownerId } });
@@ -134,6 +156,11 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
         platform.product.count(),
         platform.modifierGroup.count(),
         platform.modifier.count(),
+        platform.shift.count(),
+        platform.tab.count(),
+        platform.order.count(),
+        platform.orderItem.count(),
+        platform.orderItemModifier.count(),
       ]);
     const first = await seed(platform);
     const before = await counts();
