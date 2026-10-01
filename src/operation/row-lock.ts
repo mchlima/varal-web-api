@@ -4,7 +4,7 @@ import type { TenantDb } from '../prisma/prisma.service.js';
 
 /** Tables of the operation locked before a change (`SELECT … FOR UPDATE`). */
 export type LockableTable =
-  'units' | 'shifts' | 'tabs' | 'order_items' | 'cash_registers' | 'payments';
+  'units' | 'shifts' | 'tabs' | 'order_items' | 'cash_registers' | 'payments' | 'customers';
 
 /**
  * Locks one row until the end of the transaction, so concurrent changes of the same shift, tab or

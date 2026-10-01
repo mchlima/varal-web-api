@@ -913,6 +913,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       expect(deposit.cash).toEqual({
         openingFloatCents: 10_000,
         paymentsCents: 30_000,
+        creditSettlementsCents: 0,
         depositsCents: 5_000,
         withdrawalsCents: 20_000,
       });
@@ -979,7 +980,10 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         closingNote: 'Faltou R$ 1,00 de troco',
         closedBy: { type: 'staff', id: c.cashier.id },
       });
-      expect(closed.counts).toEqual(details.counts);
+      // RN-05.22: each count also shows the settlements of tabs on credit (none here).
+      expect(closed.counts).toEqual(
+        (details.counts as object[]).map((row) => ({ ...row, creditSettlementsCents: 0 })),
+      );
       await expect(
         platform.cashRegisterCount.count({ where: { cashRegisterId: register.id } }),
       ).resolves.toBe(4);

@@ -395,6 +395,16 @@ export type ItemChangeDto = z.infer<typeof ItemChangeSchema>;
 // Tabs (spec 04, section 4)
 // ------------------------------------------------------------------------------------------------
 
+/** The customer of a tab on credit, without phone and CPF (tab events reach every device of the unit). */
+export const TabCustomerSchema = z
+  .object({
+    id: z.uuid(),
+    name: z.string(),
+    reference: z.string().nullable(),
+    removed: z.boolean().meta({ description: 'Removido a pedido (RN-06.03).' }),
+  })
+  .meta({ id: 'TabCustomer' });
+
 export const TabSummarySchema = z
   .object({
     id: z.uuid(),
@@ -426,6 +436,13 @@ export const TabSummarySchema = z
     openedBy: ActorRefSchema,
     closedAt: z.iso.datetime().nullable(),
     version: z.int(),
+    customer: TabCustomerSchema.nullable().meta({
+      description: 'Cliente do fiado (`on_credit`, `settled`; RN-06.05); `null` nas outras.',
+    }),
+    creditAt: z.iso.datetime().nullable().meta({ description: 'Quando foi pendurada (spec 06).' }),
+    settledAt: z.iso.datetime().nullable().meta({
+      description: 'Quando o saldo pendurado chegou a zero (RN-06.10).',
+    }),
   })
   .meta({ id: 'TabSummary', description: 'Cartão da comanda no varal do balcão.' });
 

@@ -1134,7 +1134,14 @@ describe.skipIf(!databaseUrl)('operation: shifts, tabs, orders and items (spec 0
         .send({ version: other.version, reason: 'Tarde' })
         .expect(409);
       expect(errorOf(paid).code).toBe('TAB_PAID');
-      await platform.tab.update({ where: { id: tab.id }, data: { status: 'on_credit' } });
+      const row = await platform.tab.findUniqueOrThrow({ where: { id: tab.id } });
+      const customer = await platform.customer.create({
+        data: { organizationId: row.organizationId, unitId: row.unitId, name: 'Cliente' },
+      });
+      await platform.tab.update({
+        where: { id: tab.id },
+        data: { status: 'on_credit', customerId: customer.id, creditAt: new Date() },
+      });
       const onCredit = await http()
         .post(`${API}/order-items/${other.id}/cancel`)
         .set(as(c.counter.auth))

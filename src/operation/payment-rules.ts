@@ -77,6 +77,8 @@ export type ExpectedByMethod = Record<PaymentMethod, number>;
 export interface CashBreakdown {
   openingFloatCents: number;
   paymentsCents: number;
+  /** RN-05.22: part of `paymentsCents` that settled tabs on credit (spec 06). */
+  creditSettlementsCents: number;
   depositsCents: number;
   withdrawalsCents: number;
 }
@@ -88,11 +90,23 @@ export interface CashBreakdown {
  */
 export function expectedOf(
   register: { openingFloatCents: number },
-  payments: readonly { method: PaymentMethod; amountCents: number; reversedAt: Date | null }[],
+  payments: readonly {
+    method: PaymentMethod;
+    amountCents: number;
+    reversedAt: Date | null;
+    isCreditSettlement?: boolean;
+  }[],
   movements: readonly { type: CashMovementType; amountCents: number }[],
-): { expected: ExpectedByMethod; cash: CashBreakdown } {
+): { expected: ExpectedByMethod; cash: CashBreakdown; creditSettlements: ExpectedByMethod } {
   const byMethod = (method: PaymentMethod) =>
     paidCents(payments.filter((payment) => payment.method === method));
+  // RN-05.22: settlements of tabs on credit are in the expected value and also shown apart.
+  const settledBy = (method: PaymentMethod) =>
+    paidCents(
+      payments.filter(
+        (payment) => payment.method === method && payment.isCreditSettlement === true,
+      ),
+    );
   const sumOf = (type: CashMovementType) =>
     movements
       .filter((movement) => movement.type === type)
@@ -100,6 +114,7 @@ export function expectedOf(
   const cash: CashBreakdown = {
     openingFloatCents: register.openingFloatCents,
     paymentsCents: byMethod('cash'),
+    creditSettlementsCents: settledBy('cash'),
     depositsCents: sumOf('deposit'),
     withdrawalsCents: sumOf('withdrawal'),
   };
@@ -112,6 +127,12 @@ export function expectedOf(
       debit_card: byMethod('debit_card'),
     },
     cash,
+    creditSettlements: {
+      cash: settledBy('cash'),
+      pix: settledBy('pix'),
+      credit_card: settledBy('credit_card'),
+      debit_card: settledBy('debit_card'),
+    },
   };
 }
 

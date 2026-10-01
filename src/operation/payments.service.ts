@@ -24,6 +24,9 @@ import {
   TabsService,
 } from './tabs.service.js';
 
+/** RN-05.13: tabs whose payments are reversed (on credit and settled: only settlements). */
+const OPEN_FOR_REVERSAL: readonly Tab['status'][] = ['open', 'closing', 'paid'];
+
 interface PaymentInput {
   method: PaymentMethod;
   amountCents?: number | undefined;
@@ -120,7 +123,10 @@ export class PaymentsService {
   async pay(tabId: string, input: CreatePaymentRequest): Promise<PaymentResultDto> {
     return this.prisma.transaction(async (db) => {
       const tab = await this.lockTab(db, tabId, input.version);
-      if (tab.status === 'paid') {
+      if (tab.status === 'on_credit') {
+        return this.settle(db, tab, input);
+      }
+      if (tab.status === 'paid' || tab.status === 'settled') {
         throw operationError('TAB_NOTHING_TO_PAY', { balanceCents: 0 });
       }
       if (CLOSED_STATUSES.includes(tab.status)) {
@@ -146,6 +152,62 @@ export class PaymentsService {
   }
 
   /**
+   * RN-06.09 to RN-06.11 (CA-06.03): a payment of a tab on credit is a settlement. It needs an open
+   * shift and an open register in the unit of the tab (any shift, not the tab's), goes into that
+   * register marked `is_credit_settlement`, may be partial, and the tab becomes `settled` when the
+   * balance reaches zero. Methods and change follow spec 05.
+   */
+  private async settle(
+    db: TenantDb,
+    tab: Tab,
+    input: CreatePaymentRequest,
+  ): Promise<PaymentResultDto> {
+    const shift = await db.shift.findFirst({
+      where: { unitId: tab.unitId, status: 'open' },
+      select: { id: true },
+    });
+    if (!shift) {
+      throw operationError('NO_SHIFT_OPEN');
+    }
+    const summary = await loadTabSummary(db, tab.id);
+    const applied = applyPayment(input, summary.balanceCents);
+    if (typeof applied === 'string') {
+      throw refusalError(applied, summary.balanceCents);
+    }
+    const register = await this.registers.forPayment(db, shift.id, input.cashRegisterId);
+    const access = await this.access.forUnit(db, tab.unitId);
+    const paymentId = await this.record(
+      db,
+      tab,
+      register,
+      input.method,
+      applied,
+      access.actor,
+      true,
+    );
+    const settled = summary.balanceCents === applied.amountCents;
+    await db.tab.update({
+      where: { id: tab.id },
+      data: {
+        version: { increment: 1 },
+        ...(settled ? { status: 'settled', settledAt: new Date() } : {}),
+      },
+    });
+    if (settled) {
+      await this.audit.record(db, {
+        action: 'tab.settled',
+        entityType: 'tab',
+        entityId: tab.id,
+        before: { status: 'on_credit' },
+        after: { status: 'settled' },
+        metadata: { unitId: tab.unitId, totalCents: summary.totalCents, paymentId },
+      });
+    }
+    await this.registers.touched(db, register.id);
+    return this.result(db, tab.id, paymentId);
+  }
+
+  /**
    * RN-05.13 to RN-05.15 (CA-05.05): reverses a payment with a reason while its shift and its
    * register are open. The payment stays, marked; a `paid` tab goes back to `closing`.
    */
@@ -161,8 +223,10 @@ export class PaymentsService {
         throw operationError('PAYMENT_ALREADY_REVERSED');
       }
       await assertShiftOpen(db, payment.shiftId);
-      if (tab.status !== 'paid' && tab.status !== 'closing' && tab.status !== 'open') {
-        // On credit and settled tabs belong to spec 06.
+      const credit = tab.status === 'on_credit' || tab.status === 'settled';
+      if (credit ? !payment.isCreditSettlement : !OPEN_FOR_REVERSAL.includes(tab.status)) {
+        // RN-06.06, RN-06.12: on a tab on credit only settlements are reversed; the payments made
+        // before putting it on credit stay.
         throw operationError('TAB_CLOSED');
       }
       await lockRow(db, 'cash_registers', payment.cashRegisterId);
@@ -183,13 +247,16 @@ export class PaymentsService {
           reversalReason: reason,
         },
       });
-      // RN-05.14: a paid tab goes back to `closing` with the balance of the reversed payment.
-      const statusAfter = tab.status === 'paid' ? 'closing' : tab.status;
+      // RN-05.14: a paid tab goes back to `closing` with the balance of the reversed payment;
+      // RN-06.12: a settled tab goes back to `on_credit`.
+      const statusAfter =
+        tab.status === 'paid' ? 'closing' : tab.status === 'settled' ? 'on_credit' : tab.status;
       await db.tab.update({
         where: { id: tab.id },
         data: {
           version: { increment: 1 },
           ...(tab.status === 'paid' ? { status: 'closing', closedAt: null } : {}),
+          ...(tab.status === 'settled' ? { status: 'on_credit', settledAt: null } : {}),
         },
       });
       await this.audit.record(db, {
@@ -206,6 +273,7 @@ export class PaymentsService {
           amountCents: payment.amountCents,
           tabStatusBefore: tab.status,
           tabStatusAfter: statusAfter,
+          isCreditSettlement: payment.isCreditSettlement,
         },
       });
       await this.registers.touched(db, register.id);
@@ -355,7 +423,10 @@ export class PaymentsService {
     assertCounter(await this.access.forUnit(db, found.unitId));
     await lockRow(db, 'tabs', tabId);
     const tab = await requireTab(db, tabId);
-    await assertShiftOpen(db, tab.shiftId);
+    if (tab.status !== 'on_credit' && tab.status !== 'settled') {
+      // RN-06.09: a tab on credit is settled (or its settlement reversed) in any later shift.
+      await assertShiftOpen(db, tab.shiftId);
+    }
     if (version !== undefined && version !== tab.version) {
       throw operationError('TAB_CHANGED', { currentVersion: tab.version });
     }
@@ -369,6 +440,7 @@ export class PaymentsService {
     method: PaymentMethod,
     applied: AppliedPayment,
     actor: { type: 'owner' | 'staff'; id: string },
+    isCreditSettlement = false,
   ): Promise<string> {
     const payment = await db.payment.create({
       data: {
@@ -380,6 +452,7 @@ export class PaymentsService {
         amountCents: applied.amountCents,
         tenderedCents: applied.tenderedCents,
         changeCents: applied.changeCents,
+        isCreditSettlement,
         receivedByType: actor.type,
         receivedById: actor.id,
       },
@@ -393,6 +466,7 @@ export class PaymentsService {
         amountCents: applied.amountCents,
         tenderedCents: applied.tenderedCents,
         changeCents: applied.changeCents,
+        isCreditSettlement,
       },
       metadata: { tabId: tab.id, unitId: tab.unitId, cashRegisterId: register.id },
     });

@@ -186,14 +186,30 @@ export type PayFirstRequest = z.infer<typeof PayFirstRequestSchema>;
 // Cash registers (spec 05, section 5)
 // ------------------------------------------------------------------------------------------------
 
+const CreditSettlementsCentsSchema = z.int().meta({
+  description:
+    'Quitações de fiado recebidas neste caixa (não estornadas), separadas do recebido das comandas do turno (RN-05.22). Já estão somadas no esperado.',
+});
+
 export const ExpectedByMethodSchema = z
-  .object({ method: PaymentMethodSchema, expectedCents: z.int() })
+  .object({
+    method: PaymentMethodSchema,
+    expectedCents: z.int(),
+    salesCents: z.int().meta({
+      description:
+        'Pagamentos das comandas do turno nesta forma (sem quitações de fiado, sem fundo e movimentos).',
+    }),
+    creditSettlementsCents: CreditSettlementsCentsSchema,
+  })
   .meta({ id: 'CashRegisterExpected' });
 
 export const CashBreakdownSchema = z
   .object({
     openingFloatCents: z.int(),
     paymentsCents: z.int().meta({ description: 'Pagamentos em dinheiro aplicados, sem estornos.' }),
+    creditSettlementsCents: z.int().meta({
+      description: 'Parte de `paymentsCents` que veio de quitações de fiado (RN-05.22).',
+    }),
     depositsCents: z.int(),
     withdrawalsCents: z.int(),
   })
@@ -208,6 +224,7 @@ export const CashRegisterCountSchema = z
     expectedCents: z.int(),
     informedCents: z.int(),
     differenceCents: z.int().meta({ description: 'Informado − esperado (RN-05.20).' }),
+    creditSettlementsCents: CreditSettlementsCentsSchema,
   })
   .meta({ id: 'CashRegisterCount' });
 
@@ -231,6 +248,10 @@ export const CashRegisterSchema = z
     cash: CashBreakdownSchema,
     counts: z.array(CashRegisterCountSchema).meta({
       description: 'Conferência gravada no fechamento (vazia enquanto aberto).',
+    }),
+    creditSettlementsCents: z.int().meta({
+      description:
+        'Total de quitações de fiado recebidas neste caixa, em todas as formas (RN-05.22).',
     }),
     version: z.int(),
   })

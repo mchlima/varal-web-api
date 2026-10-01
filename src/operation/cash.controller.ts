@@ -127,12 +127,14 @@ export class CashController {
   @Idempotent()
   @ApiOperation({
     summary:
-      'Registra um pagamento da comanda em `closing`: Pix e cartões até o saldo, dinheiro com troco; com saldo zero a comanda fica `paid` (RN-05.04 a RN-05.10)',
+      'Registra um pagamento da comanda em `closing`: Pix e cartões até o saldo, dinheiro com troco; com saldo zero a comanda fica `paid` (RN-05.04 a RN-05.10). Em `on_credit` é quitação de fiado, em qualquer turno aberto da unidade, parcial ou total; com saldo zero fica `settled` (RN-06.09 a RN-06.11)',
   })
   @ApiCreatedResponse({ standardSchema: PaymentResultSchema })
   @NotFoundResponse()
   @Forbidden(COUNTER)
-  @Conflict(`${PAYMENT_CONFLICTS}, \`TAB_NOT_CLOSING\` (RN-05.07) ou \`TAB_CLOSED\`.`)
+  @Conflict(
+    `${PAYMENT_CONFLICTS}, \`TAB_NOT_CLOSING\` (RN-05.07), \`NO_SHIFT_OPEN\` (quitação, RN-06.09) ou \`TAB_CLOSED\`.`,
+  )
   @BadRequest('`INVALID_CASH_REGISTER` ou `VALIDATION_FAILED`.')
   pay(
     @Param('id', IdPipe) id: string,
@@ -146,7 +148,7 @@ export class CashController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Estorna um pagamento, com motivo, com turno e caixa abertos; comanda paga volta a `closing` (RN-05.13 a RN-05.15)',
+      'Estorna um pagamento, com motivo, com turno e caixa abertos; comanda paga volta a `closing` (RN-05.13 a RN-05.15) e quitada volta a `on_credit` (RN-06.12)',
   })
   @ApiOkResponse({ standardSchema: PaymentResultSchema })
   @NotFoundResponse()
