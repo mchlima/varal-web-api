@@ -1,0 +1,19 @@
+# Worktrees dos agentes (ver AGENTS.md)
+.worktrees/
+.claude/worktrees/
+
+# Ambiente local
+.env
+.env.local
+.env.*.local
+
+# Dependências e builds
+node_modules/
+dist/
+.output/
+.nuxt/
+coverage/
+
+# Sistema e editores
+.DS_Store
+*.log
