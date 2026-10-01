@@ -38,7 +38,7 @@ export function cookieOf(request: Request, name: string): string | undefined {
  * - On success it fills the request context with `setAuthContext`: organization (from the token,
  *   never from the client), actor and session. The tenant filter of Prisma relies on it.
  *
- * WebSocket connections are authenticated by the gateway of phase 1c.
+ * WebSocket connections are authenticated in the handshake by `RealtimeAuthenticator` (src/realtime).
  */
 @Injectable()
 export class AuthGuard implements CanActivate {

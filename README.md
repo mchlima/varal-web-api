@@ -1,6 +1,6 @@
 # varal-web-api
 
-API do Varal (NestJS): REST em `/api/v1` e, a partir da fase 1, WebSocket em `/ws`.
+API do Varal (NestJS): REST em `/api/v1` e tempo real (Socket.IO) em `/ws`.
 
 Specs e decisões do produto: [varal-docs](https://github.com/mchlima/varal-docs) (localmente em `../varal-docs`). Regras para agentes: [`AGENTS.md`](AGENTS.md).
 
@@ -149,7 +149,7 @@ Rotas em [`src/auth`](src/auth): `POST /auth/owner/login`, `POST /auth/staff/log
 - `X-Device-Id` (UUID) é obrigatório no login e gravado na sessão. Novo login do mesmo sujeito no mesmo aparelho encerra a sessão anterior desse aparelho.
 - **Reuso do token de renovação:** apresentar o token anterior à última rotação revoga a sessão inteira (`refresh_token_reused`), porque indica cópia. Nos 30 s seguintes à rotação ele só é recusado, sem revogar (duas abas ou um reenvio depois de resposta perdida). Só o token imediatamente anterior é reconhecido; tokens mais antigos são apenas recusados.
 - **Logout** encerra a sessão do aparelho (funciona só com o cookie de renovação, se o de acesso já venceu). **Troca de senha** encerra todas as sessões do usuário e abre uma nova para o aparelho atual. **Redefinição** (link) encerra todas. `AuthService.revokeSessionsInTransaction` serve à desativação de colaborador (RN-03.17, spec 03).
-- **Ponto de integração da fase 1c:** toda revogação emite, depois do commit, o evento interno `auth.sessions_revoked` (`AuthEvents.onSessionsRevoked`), para o gateway do Socket.IO desconectar os sockets daquelas sessões na hora.
+- Toda revogação emite, depois do commit, o evento interno `auth.sessions_revoked` (`AuthEvents.onSessionsRevoked`); o tempo real desconecta na hora os sockets daquelas sessões (seção Tempo real).
 - Organizações `suspended` ou `canceled` continuam entrando: a RN-01.01 só bloqueia abrir turno.
 - **Auditoria:** `auth.login`, `auth.logout`, `auth.password_changed`, `auth.password_reset`, `auth.invite_accepted`, `auth.password_link_issued` e `auth.sessions_revoked`. Falhas de login **não** vão para `audit_logs` (somente inserção; tentativas com identificadores inventados encheriam a tabela): alimentam o bloqueio e o bloqueio vai para o log da aplicação.
 - **Limite por IP em memória** (`RateLimiter`): logins 20/min, "esqueci a senha" 5 a cada 15 min, consulta de código 30/min, redefinição e troca de senha 10 a cada 15 min (`429 RATE_LIMITED`). Vale por instância e zera no restart; com mais de uma instância precisaria ir para o banco.
@@ -161,6 +161,99 @@ Rotas em [`src/auth`](src/auth): `POST /auth/owner/login`, `POST /auth/staff/log
 - `requestOwnerPasswordReset(email)` / `requestAdminPasswordReset(email)`: "Esqueci a senha", sempre a mesma resposta e pelo menos 400 ms, exista ou não o e-mail (**RN-01.03**);
 - `issueStaffPasswordReset(staffMemberId, { sendEmail })`: redefinição do colaborador pelo dono (RN-03.18; a rota fica para a spec 03); devolve o link para copiar ou mandar por WhatsApp;
 - `issueAdminInvite(tx, adminId)`: convite de admin (spec 02).
+
+## Tempo real (spec 01, seção 10)
+
+Socket.IO 4 em [`src/realtime`](src/realtime), no mesmo servidor e porta da API, caminho **`/ws`**, só para o app dos clientes (dono e colaborador).
+
+### Conexão
+
+```ts
+import { io } from 'socket.io-client';
+
+const socket = io(API_BASE_URL, {
+  path: '/ws',
+  transports: ['websocket'], // obrigatório: o servidor não aceita long-polling
+  withCredentials: true, // o navegador manda o cookie __Host-varal_at
+  auth: { deviceId }, // o mesmo UUID do X-Device-Id
+});
+```
+
+- **Só WebSocket** (`transports: ['websocket']`): sem long-polling não existe sticky session (cada requisição de polling poderia cair em outra instância), e o handshake é uma única requisição de upgrade que leva o cookie e o `Origin`. Todos os navegadores suportados têm WebSocket.
+- **Ping a cada 25 s** (`pingInterval` padrão do Socket.IO; `pingTimeout` 20 s): passa pelo limite de 100 s sem tráfego do Cloudflare e derruba aparelho morto em menos de um minuto.
+- **Origem (RN-01.20):** CORS não vale para WebSocket, então o `Origin` do upgrade é conferido contra a mesma lista exata de `CORS_ORIGINS` (`allowRequest`); fora da lista, ou sem `Origin`, a conexão é recusada antes do Socket.IO. Scripts fora do navegador mandam o cabeçalho (`extraHeaders: { origin }`).
+- **Autenticação no handshake:** o cookie de acesso do app (`__Host-varal_at`) é validado pelo mesmo `AuthService.authenticate` das rotas HTTP (JWT do contexto do app e linha da sessão). O token do admin nunca é aceito, com qualquer nome de cookie (CA-01.04). O aparelho vai em **`auth.deviceId`** do handshake (navegadores não mandam cabeçalhos próprios em WebSocket; na query ele apareceria nos logs de acesso), é obrigatório e tem de ser o da sessão.
+- **Recusa:** o cliente recebe `connect_error` com `err.data` no formato `ErrorResponse` e `code` em `RealtimeErrorCode`: `UNAUTHENTICATED` (sem cookie, token inválido ou vencido, sessão encerrada, outro aparelho, token do admin) ou `DEVICE_ID_REQUIRED`. Em `UNAUTHENTICATED`, o app renova a sessão por REST (`POST /auth/refresh`) e conecta de novo; se a renovação falhar, volta ao login.
+
+### Salas
+
+| Sala                  | Quem entra (automaticamente, no handshake)                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `unit:{unitId}`       | Dono: todas as unidades **ativas** da organização. Colaborador: as unidades ativas de `staff_unit_permissions`    |
+| `station:{stationId}` | Colaborador: as estações de `station_ids` dessas unidades. Dono: nenhuma até a spec 03 criar a tabela de estações |
+
+- As salas são calculadas pelo cliente do Prisma filtrado pela organização da sessão; nunca entra sala de outra organização (CA-01.02).
+- **Opcional:** `socket.emitWithAck('rooms.leave', { room })` sai de uma sala (ex.: estações que o aparelho não está operando) e `rooms.join` volta a ela, conferida no servidor contra as permissões atuais. A resposta é `RealtimeRoomAck`: `{ ok: true, rooms }` ou `{ ok: false, error }` com `ROOM_FORBIDDEN` (sala inexistente, de outra organização ou sem permissão; mesma resposta nos três casos) ou `VALIDATION_FAILED`.
+- Uma sala interna por sessão (`session:{id}`) serve para encerrar os sockets dela; o cliente não consegue entrar nela.
+- As salas são fixadas na conexão. Mudança de permissão (spec 03) vale na próxima conexão; quem a fizer deve chamar `RealtimeService.endSessions` ou revogar as sessões se precisar efeito imediato.
+
+### Desconexão
+
+| Evento recebido antes da desconexão                         | Quando                                                                                                             | O que o app faz                                                             |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------- |
+| `session.revoked` (`EventSessionRevoked`, `data.reason`)    | Logout, troca ou redefinição de senha, desativação, novo login no aparelho, reuso do token de renovação (CA-01.05) | Volta para o login                                                          |
+| `session.expired` (`EventSessionExpired`, `data.expiredAt`) | Venceu o token de acesso usado no handshake (15 min)                                                               | `POST /auth/refresh` e `socket.connect()` (o navegador manda o cookie novo) |
+
+Nos dois casos o servidor desconecta em seguida e o cliente recebe `disconnect` com motivo `io server disconnect`, no qual o Socket.IO **não** reconecta sozinho. Se o evento se perder, trate `io server disconnect` como `session.expired`: tente renovar; se a renovação falhar, login. As outras quedas (rede, servidor reiniciando) reconectam sozinhas.
+
+A revogação chega pelo evento interno `auth.sessions_revoked` (`AuthEvents`), emitido depois do commit: o socket cai na hora, junto com o HTTP.
+
+### Eventos (contrato para o app)
+
+- Nome do evento no Socket.IO = `type` (ex.: `order.created`, spec 04). Envelope de todo evento de unidade ou estação: `{ type, organizationId, unitId, occurredAt, version, data }` (seção 10).
+- Cada evento é um schema zod publicado no `openapi.json` como `Event…` (RN-01.10). Os eventos de negócio entram com as specs 03, 04 e 05; nesta fase só existem `EventSessionRevoked` e `EventSessionExpired` (eventos da sessão, sem unidade nem versão).
+- **RN-01.05:** ao conectar e a cada reconexão, o app primeiro busca o estado atual por REST (comandas abertas, fila da estação) e só depois aplica eventos; eventos guardados durante a busca são aplicados em seguida. Eventos perdidos na desconexão nunca são necessários: o servidor não reenvia nada (sem connection state recovery).
+- O app ignora evento com `version` menor ou igual à do registro que já tem (o REST pode ter trazido um estado mais novo que o evento).
+
+### Emitir eventos (módulos das specs 03 a 05)
+
+```ts
+export const OrderCreated = defineRealtimeEvent('EventOrderCreated', 'order.created', OrderSchema);
+// em src/openapi/contract-schemas.ts: OrderCreated.schema
+
+await this.prisma.transaction(async (tx) => {
+  const order = await tx.order.create({ ... });
+  this.realtime.emitToUnit(OrderCreated, { unitId: order.unitId, version: order.version, data: order });
+  this.realtime.emitToStation(stationId, OrderCreated, { unitId: order.unitId, version: order.version, data: soDaEstacao });
+});
+```
+
+- `RealtimeService` (importe o `RealtimeModule`) monta o envelope com a organização do contexto (nunca do chamador) e o valida com o schema na hora da chamada: payload inválido falha a ação e desfaz a transação.
+- O envio acontece **só depois do commit** (`PrismaService.afterCommit`): evento de transação desfeita nunca sai. Fora de transação, sai na hora. O `unitId` e o `stationId` têm de vir de registros lidos pelo cliente filtrado da organização.
+- **Uma instância:** as salas ficam na memória do processo (adapter padrão do Socket.IO), como o `auth.sessions_revoked` e o limite por IP. Mais de uma instância exigiria um adapter compartilhado (ex.: `@socket.io/postgres-adapter`); sticky session continua desnecessária, porque não há polling.
+
+### Testar à mão
+
+```bash
+pnpm dev
+curl -c jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'content-type: application/json' \
+  -d '{"email":"dono@varal.local","password":"varal12345"}' http://localhost:3000/api/v1/auth/owner/login
+node -e "
+const { io } = require('socket.io-client');
+const cookie = require('fs').readFileSync('jar.txt', 'utf8').split('\n')
+  .filter((l) => l.includes('varal_at')).map((l) => l.split('\t')).map((f) => f[5] + '=' + f[6]).join('; ');
+const s = io('http://localhost:3000', { path: '/ws', transports: ['websocket'],
+  extraHeaders: { cookie, origin: 'http://localhost:3100' }, auth: { deviceId: '0192f000-0000-7000-8000-000000000001' } });
+// a resposta de rooms.leave lista as salas do aparelho
+s.on('connect', () => s.emitWithAck('rooms.leave', { room: 'unit:' + crypto.randomUUID() }).then(console.log));
+s.onAny((e, p) => console.log(e, p));
+s.on('connect_error', (e) => console.log('connect_error', e.data));
+s.on('disconnect', (r) => console.log('disconnect', r));
+"
+# noutro terminal: curl -b jar.txt -X POST http://localhost:3000/api/v1/auth/logout  → session.revoked e disconnect
+```
+
+O `curl` grava os cookies `__Host-`/`__Secure-` com o prefixo `#HttpOnly_` no `jar.txt`; o filtro acima pega a linha do cookie de acesso.
 
 ## E-mail (spec 01, seção 9)
 

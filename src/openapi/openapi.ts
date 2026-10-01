@@ -111,7 +111,7 @@ export function buildOpenApiDocument(
     .setOpenAPIVersion(OPENAPI_VERSION)
     .setTitle('Varal API')
     .setDescription(
-      'REST API do Varal (`/api/v1`). Contrato consumido pelos apps (spec 01, seção 3.1).',
+      'REST API do Varal (`/api/v1`) e tempo real (Socket.IO em `/ws`, payloads `Event…` e `Realtime…` em `components.schemas`). Contrato consumido pelos apps (spec 01, seção 3.1).',
     )
     // Kept in sync with package.json; release-please bumps both (release-please-config.json).
     .setVersion(packageVersion())
