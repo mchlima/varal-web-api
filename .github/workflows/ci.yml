@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Lint, tipos, testes e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      # Mesmo Postgres da produção, para os testes de integração (RN-01.06).
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: varal
+          POSTGRES_PASSWORD: varal
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U varal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://varal:varal@localhost:5432/varal_ci
+      DATABASE_URL_TEST: postgresql://varal:varal@localhost:5432/varal_ci_test
+      CORS_ORIGINS: http://localhost:3100,http://localhost:3200
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependências
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Formatação
+        run: pnpm format:check
+
+      - name: Tipos
+        run: pnpm typecheck
+
+      - name: Testes
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+      # CA-01.11: o openapi.json commitado tem de ser igual ao gerado pelo código.
+      - name: openapi.json atualizado
+        run: |
+          pnpm openapi
+          if ! git diff --exit-code -- openapi.json; then
+            echo "::error file=openapi.json::openapi.json desatualizado. Rode 'pnpm openapi' e commite o arquivo (RN-01.09)."
+            exit 1
+          fi

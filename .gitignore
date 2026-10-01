@@ -17,3 +17,6 @@ coverage/
 # Sistema e editores
 .DS_Store
 *.log
+
+# Prisma Client gerado (`pnpm db:generate`)
+src/generated/

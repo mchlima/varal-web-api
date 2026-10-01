@@ -12,7 +12,22 @@ Stack: Node 22, TypeScript estrito, NestJS, PostgreSQL 17, Prisma, zod, pg-boss 
 
 ### Comandos
 
-Ainda não há código. Quando o projeto for criado, registre aqui os comandos de instalação, desenvolvimento, testes, lint, migrations, geração do OpenAPI e build, e mantenha esta seção atualizada.
+```sh
+pnpm install            # dependências (gera o Prisma Client no postinstall)
+pnpm dev                # API em http://localhost:$PORT (3000 + PORT_OFFSET), com recarga
+pnpm test               # Vitest; testes de integração rodam quando há DATABASE_URL_TEST
+pnpm lint && pnpm format:check && pnpm typecheck
+pnpm build && pnpm start
+pnpm openapi            # regenera o openapi.json (commite junto com a mudança; a CI compara)
+pnpm db:migrate         # cria e aplica migration em desenvolvimento (prisma migrate dev)
+pnpm db:deploy          # aplica migrations pendentes (CI e produção)
+scripts/worktree.sh new <tipo>/<descricao>   # worktree com porta, .env.local e bancos próprios
+scripts/worktree.sh list | remove <nome>
+```
+
+- Precisa do Postgres de desenvolvimento do `varal-infra` (`docker compose -f ../varal-infra/dev/compose.yml up -d`).
+- Prisma fixo em **7.10.0 exato**: não atualize para o 8 (RC) sem decisão registrada no plano.
+- `dev` e `openapi` rodam com `@swc-node/register`, porque o Nest precisa dos metadados de decorators (tsx e esbuild não geram).
 
 ### Regras que não podem quebrar
 

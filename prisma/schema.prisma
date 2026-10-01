@@ -1,0 +1,13 @@
+// Varal database schema. Business models arrive in phase 1 (spec 01, section 12).
+// Connection URL lives in prisma.config.ts; the client connects through @prisma/adapter-pg.
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  moduleFormat           = "esm"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
