@@ -6,7 +6,7 @@ Specs e decisões do produto: [varal-docs](https://github.com/mchlima/varal-docs
 
 ## Stack
 
-Node 22 (`>=22.12`), pnpm 10, NestJS 12 (ESM, Express 5), TypeScript estrito, zod 4 (validação nativa do Nest via Standard Schema), Prisma 7.10.0 com `@prisma/adapter-pg`, PostgreSQL 17, OpenAPI 3.1 com `@nestjs/swagger`, Vitest 5 com SWC, ESLint 10 e Prettier.
+Node 26 (`>=26`, ver `.nvmrc`), pnpm 10, NestJS 12 (ESM, Express 5), TypeScript estrito, zod 4 (validação nativa do Nest via Standard Schema), Prisma 7.10.0 com `@prisma/adapter-pg`, PostgreSQL 17, OpenAPI 3.1 com `@nestjs/swagger`, Vitest 5 com SWC, ESLint 10 e Prettier.
 
 ## Primeiros passos
 
@@ -60,4 +60,4 @@ O `openapi.json` na raiz é o contrato consumido pelos apps (RN-01.09). Todo PR 
 
 ## Imagem
 
-`Dockerfile` multi-stage sobre `node:22-alpine`, rodando como `node`: `docker build -t varal-web-api .`. A imagem inclui o CLI do Prisma para o `prisma migrate deploy` do deploy.
+`Dockerfile` multi-stage sobre `node:26-alpine`, rodando como `node`: `docker build -t varal-web-api .`. A imagem inclui o CLI do Prisma para o `prisma migrate deploy` do deploy.
