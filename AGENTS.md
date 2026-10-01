@@ -136,6 +136,14 @@ Cada worktree roda o próprio ambiente sem disputar portas nem banco com os outr
 - O PR vai da branch de trabalho para a `main`, com título no formato Conventional Commits e descrição com o que mudou, as regras e critérios de aceite cobertos (`RN-XX.YY`, `CA-XX.YY`), como testar e os PRs relacionados em outros repositórios.
 - Não faça commit, push nem abra PR sem pedido explícito.
 
+### Bloqueio da main
+
+Como o plano gratuito do GitHub não protege branches em repositórios privados, o bloqueio é feito localmente, em duas camadas presentes em todos os repositórios:
+
+- **Git hooks** em `.githooks/`: `pre-commit` recusa commit na `main` e `pre-push` recusa push para a `main`. Ative uma vez por clone com `git config core.hooksPath .githooks` (vale para todos os worktrees daquele clone). O `scripts/worktree.sh` dos repositórios de código confere isso.
+- **Hook do Claude Code** em `.claude/settings.json` (`.claude/hooks/guard-main.py`): antes de executar, recusa `git commit`, `merge`, `rebase`, `cherry-pick`, `revert` e `am` na `main`, push para a `main` e qualquer `--no-verify`.
+- **Nunca** use `--no-verify`, nunca desative ou altere os hooks para contornar o bloqueio, e nunca mude `core.hooksPath`. Se um hook bloquear algo legítimo, pare e fale com o usuário.
+
 ### Mensagens de commit
 
 Todo commit segue o [Conventional Commits 1.0.0](https://www.conventionalcommits.org/pt-br/v1.0.0/):
