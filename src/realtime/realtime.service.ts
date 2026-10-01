@@ -96,6 +96,22 @@ export class RealtimeService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * One event to the unit room and to station rooms at once: a socket in several of these rooms
+   * (e.g. the counter, also in the delivery station) gets it only once.
+   */
+  emitToUnitAndStations<TType extends string, TData extends z.ZodType>(
+    stationIds: readonly string[],
+    event: RealtimeEventDefinition<TType, TData>,
+    payload: RealtimeEmit<z.infer<TData>>,
+  ): void {
+    this.emitAfterCommit(
+      [unitRoom(payload.unitId), ...stationIds.map(stationRoom)],
+      event,
+      payload,
+    );
+  }
+
+  /**
    * Sends `session.revoked` to every socket of these sessions and disconnects them (CA-01.05).
    * Called after the revocation committed.
    */

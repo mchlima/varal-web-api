@@ -22,6 +22,32 @@
         ],
         "type": "object"
       },
+      "ActorRef": {
+        "additionalProperties": false,
+        "description": "Quem fez a ação (dono ou colaborador).",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActorType"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "type": "object"
+      },
       "ActorType": {
         "description": "Quem fez a ação registrada na auditoria.",
         "enum": [
@@ -320,6 +346,36 @@
           "nextCursor"
         ],
         "type": "object"
+      },
+      "AdvanceItemRequestInput": {
+        "properties": {
+          "quantity": {
+            "description": "Quantas unidades seguem (RN-04.24); padrão: todas. Menos que a quantidade divide o item em duas linhas.",
+            "maximum": 99,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "description": "Versão do item que o aparelho tem. Se outro aparelho mudou o item antes, a API responde 409 `ITEM_CHANGED` com o estado atual em `details.item` (CA-04.05).",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "AgreementModality": {
+        "description": "`fixed_fee`: valor fixo; `per_quantity`: por quantidade; `consumption_billed`: o contratante paga o consumo no final; `other` (RN-04.05).",
+        "enum": [
+          "fixed_fee",
+          "per_quantity",
+          "consumption_billed",
+          "other"
+        ],
+        "type": "string"
       },
       "Announcement": {
         "additionalProperties": false,
@@ -749,6 +805,64 @@
         ],
         "type": "string"
       },
+      "BackItemRequestInput": {
+        "properties": {
+          "version": {
+            "description": "Versão do item que o aparelho tem. Se outro aparelho mudou o item antes, a API responde 409 `ITEM_CHANGED` com o estado atual em `details.item` (CA-04.05).",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "CancelItemRequestInput": {
+        "properties": {
+          "quantity": {
+            "description": "Quantas unidades cancelar (RN-04.26); padrão: todas.",
+            "maximum": 99,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Motivo, até 140 caracteres (RN-04.25).",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do item que o aparelho tem. Se outro aparelho mudou o item antes, a API responde 409 `ITEM_CHANGED` com o estado atual em `details.item` (CA-04.05).",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "CancelTabRequestInput": {
+        "properties": {
+          "reason": {
+            "description": "Motivo, até 140 caracteres.",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "Category": {
         "additionalProperties": false,
         "properties": {
@@ -1064,6 +1178,61 @@
         ],
         "type": "object"
       },
+      "CreateOrderRequestInput": {
+        "description": "Pedido com 1 a 50 itens (RN-04.16).",
+        "properties": {
+          "items": {
+            "items": {
+              "properties": {
+                "modifierIds": {
+                  "default": [],
+                  "items": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "maxLength": 140,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Observação livre, até 140 caracteres."
+                },
+                "productId": {
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "type": "string"
+                },
+                "quantity": {
+                  "maximum": 99,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "productId",
+                "quantity"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CreateOrganizationRequestInput": {
         "properties": {
           "name": {
@@ -1268,6 +1437,20 @@
         ],
         "type": "object"
       },
+      "CreateTabRequestInput": {
+        "properties": {
+          "customerName": {
+            "description": "Nome do cliente, de 1 a 40 caracteres (RN-04.10).",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "customerName"
+        ],
+        "type": "object"
+      },
       "CreateUnitRequestInput": {
         "properties": {
           "lateAfterMinutes": {
@@ -1287,6 +1470,34 @@
           "name"
         ],
         "type": "object"
+      },
+      "CurrentShift": {
+        "additionalProperties": false,
+        "properties": {
+          "shift": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Shift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` sem turno aberto."
+          }
+        },
+        "required": [
+          "shift"
+        ],
+        "type": "object"
+      },
+      "DiscountType": {
+        "description": "Desconto da comanda (spec 05): `amount` em centavos ou `percent` de 1 a 100.",
+        "enum": [
+          "amount",
+          "percent"
+        ],
+        "type": "string"
       },
       "EmailLog": {
         "additionalProperties": false,
@@ -1610,6 +1821,273 @@
         ],
         "type": "object"
       },
+      "EventOrderCompleted": {
+        "additionalProperties": false,
+        "description": "Todos os itens do pedido estão na etapa final ou cancelados (sala `unit`). `version` é a do pedido.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "orderId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "tabId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "orderId",
+              "tabId"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "order.completed",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventOrderCreated": {
+        "additionalProperties": false,
+        "description": "Pedido enviado. Na sala `unit` vai completo; na sala de cada `station`, só com os itens daquela estação (CA-04.03).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "order.created",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventOrderItemCanceled": {
+        "additionalProperties": false,
+        "description": "Item cancelado (sala `unit` e sala `station` em que estava). `version` é a do item.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "item": {
+                "$ref": "#/components/schemas/OrderItem",
+                "description": "A linha cancelada."
+              },
+              "previousStationId": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Estação em que a linha estava antes do cancelamento."
+              },
+              "remaining": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OrderItem"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Cancelamento parcial (RN-04.26): a linha original, com o restante, ativa."
+              }
+            },
+            "required": [
+              "item",
+              "previousStationId",
+              "remaining"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "order_item.canceled",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventOrderItemStageChanged": {
+        "additionalProperties": false,
+        "description": "Item mudou de etapa (avançar ou voltar). Vai à sala `unit` e às salas `station` de origem e de destino (CA-04.04). `version` é a do item.",
+        "properties": {
+          "data": {
+            "additionalProperties": false,
+            "properties": {
+              "item": {
+                "$ref": "#/components/schemas/OrderItem",
+                "description": "A linha que mudou de etapa (a linha nova, quando avançou só parte da quantidade)."
+              },
+              "previousStageId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "previousStationId": {
+                "anyOf": [
+                  {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Estação em que a linha estava: sai da fila dela se for diferente de `item.stationId`."
+              },
+              "remaining": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/OrderItem"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Avanço de parte da quantidade (RN-04.24): a linha original, com o restante, na etapa em que estava."
+              }
+            },
+            "required": [
+              "item",
+              "previousStageId",
+              "previousStationId",
+              "remaining"
+            ],
+            "type": "object"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "order_item.stage_changed",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
       "EventProductSoldOutChanged": {
         "additionalProperties": false,
         "description": "Produto marcado ou desmarcado como esgotado (RN-03.11). `version` é a versão do produto: o balcão bloqueia ou libera o produto sem recarregar o cardápio.",
@@ -1766,6 +2244,221 @@
         "required": [
           "type",
           "occurredAt",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventShiftClosed": {
+        "additionalProperties": false,
+        "description": "Turno fechado (sala `unit`). Itens que ainda não estavam na etapa final foram levados a ela (RN-04.08): as filas das estações ficam vazias.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Shift"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "shift.closed",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventShiftOpened": {
+        "additionalProperties": false,
+        "description": "Turno aberto na unidade (sala `unit`). `version` é a versão do turno.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Shift"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "shift.opened",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventShiftUpdated": {
+        "additionalProperties": false,
+        "description": "Proposta (não listado na spec 04): tabela de preços do turno alterada (RN-04.06). O balcão passa a mostrar os preços novos.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Shift"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "shift.updated",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventTabCreated": {
+        "additionalProperties": false,
+        "description": "Comanda criada, com totais (sala `unit`).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TabSummary"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "tab.created",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventTabUpdated": {
+        "additionalProperties": false,
+        "description": "Comanda com situação, totais e `version` novos (sala `unit`): pedido novo, item cancelado, pedir a conta, reabrir, cancelar.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TabSummary"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "tab.updated",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
           "data"
         ],
         "type": "object"
@@ -2042,6 +2735,31 @@
         "required": [
           "data",
           "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ItemChange": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "$ref": "#/components/schemas/OrderItem",
+            "description": "A linha que mudou de etapa ou foi cancelada (a linha nova, quando houve divisão)."
+          },
+          "remaining": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OrderItem"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Numa divisão (parte da quantidade), a linha original com o restante, na etapa em que estava; senão `null`."
+          }
+        },
+        "required": [
+          "changed",
+          "remaining"
         ],
         "type": "object"
       },
@@ -2454,6 +3172,523 @@
         ],
         "type": "object"
       },
+      "OpenShiftRequestInput": {
+        "properties": {
+          "agreement": {
+            "anyOf": [
+              {
+                "properties": {
+                  "agreedAmountCents": {
+                    "anyOf": [
+                      {
+                        "maximum": 100000000,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "agreedQuantity": {
+                    "anyOf": [
+                      {
+                        "maximum": 1000000,
+                        "minimum": 1,
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "contractorName": {
+                    "maxLength": 80,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "limits": {
+                    "anyOf": [
+                      {
+                        "maxLength": 200,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "modality": {
+                    "$ref": "#/components/schemas/AgreementModality"
+                  },
+                  "notes": {
+                    "anyOf": [
+                      {
+                        "maxLength": 500,
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "contractorName",
+                  "modality"
+                ],
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Obrigatório no turno contratado; não vale na venda direta (RN-04.05)."
+          },
+          "prices": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/ShiftPriceInput"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ShiftType"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "type": "object"
+      },
+      "OperationErrorCode": {
+        "description": "Códigos de erro da operação (spec 04): turno, comandas, pedidos e itens. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.",
+        "enum": [
+          "SHIFT_ALREADY_OPEN",
+          "UNIT_INACTIVE",
+          "SHIFT_CLOSED",
+          "SHIFT_HAS_PENDING_ITEMS",
+          "INVALID_SHIFT_PRICE",
+          "TAB_NOT_OPEN",
+          "TAB_NOT_CLOSING",
+          "TAB_CLOSED",
+          "TAB_HAS_ACTIVE_ITEMS",
+          "TAB_CHANGED",
+          "ORDER_REJECTED",
+          "ITEM_CHANGED",
+          "ITEM_CANCELED",
+          "ITEM_IN_FINAL_STAGE",
+          "NO_PREVIOUS_STAGE",
+          "INVALID_QUANTITY"
+        ],
+        "type": "string"
+      },
+      "Order": {
+        "additionalProperties": false,
+        "properties": {
+          "completedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            },
+            "type": "array"
+          },
+          "numberInTab": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "sentAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OrderStatus"
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabNumber": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tabId",
+          "shiftId",
+          "unitId",
+          "tabNumber",
+          "customerName",
+          "numberInTab",
+          "status",
+          "createdBy",
+          "sentAt",
+          "completedAt",
+          "items",
+          "version"
+        ],
+        "type": "object"
+      },
+      "OrderItem": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "canceledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canceledBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "isLate": {
+            "description": "Atrasado no momento da resposta (CA-04.11).",
+            "type": "boolean"
+          },
+          "lateAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quando o item passa a estar atrasado: envio + `lateAfterMinutes` da unidade (RN-04.23). `null` na etapa final ou cancelado."
+          },
+          "modifiers": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemModifier"
+            },
+            "type": "array"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "orderId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "orderNumberInTab": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "prepStationId": {
+            "description": "Estação de preparo resolvida no envio.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "productName": {
+            "description": "Cópia do nome no momento da venda (RN-04.18).",
+            "type": "string"
+          },
+          "quantity": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "sentAt": {
+            "description": "Envio do pedido.",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "splitFromId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Linha original de uma divisão (avançar ou cancelar parte, RN-04.24/RN-04.26)."
+          },
+          "stageEnteredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "stageId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "stageIsFinal": {
+            "type": "boolean"
+          },
+          "stageName": {
+            "type": "string"
+          },
+          "stationId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estação em que o item aparece agora; `null` na etapa final ou cancelado."
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabNumber": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "totalCents": {
+            "description": "`(unitPriceCents + Σ priceDeltaCents) × quantity` (spec 04, seção 6).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "unitPriceCents": {
+            "description": "Preço unitário vigente no envio: do turno ou do cardápio (RN-04.18).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasted": {
+            "description": "Cancelado depois de sair da primeira etapa: perda (RN-04.27).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "orderId",
+          "tabId",
+          "unitId",
+          "tabNumber",
+          "customerName",
+          "orderNumberInTab",
+          "productId",
+          "productName",
+          "unitPriceCents",
+          "quantity",
+          "note",
+          "modifiers",
+          "totalCents",
+          "prepStationId",
+          "stationId",
+          "stageId",
+          "stageName",
+          "stageIsFinal",
+          "stageEnteredAt",
+          "sentAt",
+          "lateAt",
+          "isLate",
+          "canceledAt",
+          "canceledBy",
+          "cancelReason",
+          "wasted",
+          "splitFromId",
+          "version"
+        ],
+        "type": "object"
+      },
+      "OrderItemModifier": {
+        "additionalProperties": false,
+        "description": "Cópia do modificador escolhido (RN-04.18).",
+        "properties": {
+          "groupName": {
+            "type": "string"
+          },
+          "modifierId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "modifierName": {
+            "type": "string"
+          },
+          "priceDeltaCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "modifierId",
+          "groupName",
+          "modifierName",
+          "priceDeltaCents"
+        ],
+        "type": "object"
+      },
+      "OrderItemRejection": {
+        "additionalProperties": false,
+        "properties": {
+          "index": {
+            "description": "Posição do item no corpo do pedido (a partir de 0).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "modifierGroupId": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "productId": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/OrderItemRejectionReason"
+          }
+        },
+        "required": [
+          "index",
+          "productId",
+          "reason",
+          "modifierGroupId"
+        ],
+        "type": "object"
+      },
+      "OrderItemRejectionReason": {
+        "description": "Motivo de um item recusado em `ORDER_REJECTED` (RN-04.17): `product_unavailable` (não existe ou é de outra unidade), `product_inactive`, `sold_out`, `modifier_required` (grupo obrigatório sem escolha, CA-03.06), `too_many_modifiers`, `invalid_modifier`.",
+        "enum": [
+          "product_unavailable",
+          "product_inactive",
+          "sold_out",
+          "modifier_required",
+          "too_many_modifiers",
+          "invalid_modifier"
+        ],
+        "type": "string"
+      },
+      "OrderRejectedDetails": {
+        "additionalProperties": false,
+        "description": "`details` do 409 `ORDER_REJECTED` (RN-04.17, CA-04.06).",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrderItemRejection"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "OrderStatus": {
+        "description": "`sent` enquanto houver item em etapa não final; `completed` quando todos estão na etapa final ou cancelados.",
+        "enum": [
+          "sent",
+          "completed"
+        ],
+        "type": "string"
+      },
       "OrganizationAccess": {
         "additionalProperties": false,
         "properties": {
@@ -2526,7 +3761,7 @@
             ]
           },
           "recentShifts": {
-            "description": "Últimos 10 turnos. Vazio até a spec 04 criar os turnos.",
+            "description": "Últimos 10 turnos, do mais novo para o mais antigo.",
             "items": {
               "$ref": "#/components/schemas/OrganizationShiftSummary"
             },
@@ -2663,7 +3898,7 @@
       },
       "OrganizationShiftSummary": {
         "additionalProperties": false,
-        "description": "Turno no detalhe da organização (os turnos chegam com a spec 04).",
+        "description": "Turno no detalhe da organização (spec 04).",
         "properties": {
           "closedAt": {
             "anyOf": [
@@ -3369,6 +4604,28 @@
         },
         "type": "object"
       },
+      "PutShiftPricesRequestInput": {
+        "properties": {
+          "prices": {
+            "description": "A tabela inteira; substitui a anterior.",
+            "items": {
+              "$ref": "#/components/schemas/ShiftPriceInput"
+            },
+            "maxItems": 500,
+            "type": "array"
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prices"
+        ],
+        "type": "object"
+      },
       "PutStaffPermissionsRequestInput": {
         "properties": {
           "units": {
@@ -3769,6 +5026,275 @@
         ],
         "type": "string"
       },
+      "Shift": {
+        "additionalProperties": false,
+        "properties": {
+          "agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShiftAgreement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Só no turno contratado."
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "prices": {
+            "description": "Tabela de preços do turno; produtos fora dela usam o preço do cardápio (RN-04.06).",
+            "items": {
+              "$ref": "#/components/schemas/ShiftPrice"
+            },
+            "type": "array"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ShiftStatus"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ShiftType"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "unitId",
+          "type",
+          "status",
+          "openedAt",
+          "openedBy",
+          "closedAt",
+          "closedBy",
+          "agreement",
+          "prices",
+          "version"
+        ],
+        "type": "object"
+      },
+      "ShiftAgreement": {
+        "additionalProperties": false,
+        "description": "Acordo do turno contratado (RN-04.05).",
+        "properties": {
+          "agreedAmountCents": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreedQuantity": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "contractorName": {
+            "type": "string"
+          },
+          "limits": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modality": {
+            "$ref": "#/components/schemas/AgreementModality"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "contractorName",
+          "modality",
+          "agreedAmountCents",
+          "agreedQuantity",
+          "limits",
+          "notes"
+        ],
+        "type": "object"
+      },
+      "ShiftPendingItems": {
+        "additionalProperties": false,
+        "description": "`details` do 409 `SHIFT_HAS_PENDING_ITEMS` ao fechar o turno (RN-04.07, CA-04.09).",
+        "properties": {
+          "cashRegisters": {
+            "description": "Caixas ainda abertos (spec 05; vazio até os caixas existirem).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "tabs": {
+            "description": "Comandas em `open` ou `closing`.",
+            "items": {
+              "$ref": "#/components/schemas/ShiftPendingTab"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tabs",
+          "cashRegisters"
+        ],
+        "type": "object"
+      },
+      "ShiftPendingTab": {
+        "additionalProperties": false,
+        "properties": {
+          "customerName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TabStatus"
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "customerName",
+          "status"
+        ],
+        "type": "object"
+      },
+      "ShiftPrice": {
+        "additionalProperties": false,
+        "description": "Preço de um produto só neste turno (RN-04.06).",
+        "properties": {
+          "priceCents": {
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "productId",
+          "priceCents"
+        ],
+        "type": "object"
+      },
+      "ShiftPriceInput": {
+        "description": "Preço de um produto só neste turno (RN-04.06).",
+        "properties": {
+          "priceCents": {
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "productId",
+          "priceCents"
+        ],
+        "type": "object"
+      },
+      "ShiftStatus": {
+        "enum": [
+          "open",
+          "closed"
+        ],
+        "type": "string"
+      },
+      "ShiftType": {
+        "description": "`direct_sale`: venda direta; `contracted`: turno contratado, com acordo (RN-04.04). Não muda depois da abertura.",
+        "enum": [
+          "direct_sale",
+          "contracted"
+        ],
+        "type": "string"
+      },
       "StaffLoginRequestInput": {
         "properties": {
           "accessCode": {
@@ -4075,6 +5601,48 @@
         ],
         "type": "object"
       },
+      "StationQueue": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Itens nesta estação, do pedido mais antigo para o mais novo; itens do mesmo pedido juntos.",
+            "items": {
+              "$ref": "#/components/schemas/OrderItem"
+            },
+            "type": "array"
+          },
+          "lateAfterMinutes": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "stages": {
+            "description": "Fluxo da unidade em ordem, para o nome do botão de avançar (\"Começar\", \"Pronto\") e o filtro por etapa.",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowStage"
+            },
+            "type": "array"
+          },
+          "stationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stationId",
+          "unitId",
+          "lateAfterMinutes",
+          "stages",
+          "items"
+        ],
+        "type": "object"
+      },
       "StationSummary": {
         "additionalProperties": false,
         "properties": {
@@ -4227,6 +5795,338 @@
         },
         "required": [
           "reason"
+        ],
+        "type": "object"
+      },
+      "Tab": {
+        "additionalProperties": false,
+        "description": "Comanda com pedidos, itens e totais.",
+        "properties": {
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "discountCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "discountType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiscountType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discountValue": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "itemCount": {
+            "description": "Unidades em itens não cancelados.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "lateItemCount": {
+            "description": "Unidades atrasadas (RN-04.23).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TabMode"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "orders": {
+            "description": "Pedidos, do primeiro ao último.",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            },
+            "type": "array"
+          },
+          "readyItemCount": {
+            "description": "Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TabStatus"
+          },
+          "subtotalCents": {
+            "description": "Soma dos itens não cancelados (RN-04.14).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "totalCents": {
+            "description": "Subtotal − desconto (RN-04.14).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "unitId",
+          "number",
+          "customerName",
+          "mode",
+          "status",
+          "subtotalCents",
+          "discountType",
+          "discountValue",
+          "discountCents",
+          "totalCents",
+          "itemCount",
+          "readyItemCount",
+          "lateItemCount",
+          "openedAt",
+          "openedBy",
+          "closedAt",
+          "version",
+          "orders"
+        ],
+        "type": "object"
+      },
+      "TabActionRequestInput": {
+        "properties": {
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "TabList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TabSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "TabMode": {
+        "description": "`pay_first`: paga antes, o pedido só vai às estações depois do pagamento (spec 05); `open_tab`: comanda aberta, paga no fechamento (RN-04.11).",
+        "enum": [
+          "pay_first",
+          "open_tab"
+        ],
+        "type": "string"
+      },
+      "TabStatus": {
+        "description": "Situação da comanda (RN-04.12): `open`, `closing` (pediu a conta), `paid` (spec 05), `on_credit` e `settled` (spec 06), `canceled`.",
+        "enum": [
+          "open",
+          "closing",
+          "paid",
+          "on_credit",
+          "settled",
+          "canceled"
+        ],
+        "type": "string"
+      },
+      "TabSummary": {
+        "additionalProperties": false,
+        "description": "Cartão da comanda no varal do balcão.",
+        "properties": {
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "discountCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "discountType": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiscountType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "discountValue": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "itemCount": {
+            "description": "Unidades em itens não cancelados.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "lateItemCount": {
+            "description": "Unidades atrasadas (RN-04.23).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/TabMode"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "readyItemCount": {
+            "description": "Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TabStatus"
+          },
+          "subtotalCents": {
+            "description": "Soma dos itens não cancelados (RN-04.14).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "totalCents": {
+            "description": "Subtotal − desconto (RN-04.14).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "unitId",
+          "number",
+          "customerName",
+          "mode",
+          "status",
+          "subtotalCents",
+          "discountType",
+          "discountValue",
+          "discountCents",
+          "totalCents",
+          "itemCount",
+          "readyItemCount",
+          "lateItemCount",
+          "openedAt",
+          "openedBy",
+          "closedAt",
+          "version"
         ],
         "type": "object"
       },
@@ -9494,6 +11394,344 @@
         ]
       }
     },
+    "/api/v1/order-items/{id}/advance": {
+      "post": {
+        "operationId": "OperationController_advance",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdvanceItemRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemChange"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_QUANTITY`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: sem acesso à estação do item (o balcão só registra a entrega, RN-04.21)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`ITEM_CHANGED` (outro aparelho mudou o item antes: `details.item` traz o estado atual, CA-04.05), `ITEM_CANCELED`, `SHIFT_CLOSED` ou `ITEM_IN_FINAL_STAGE`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Avança o item para a próxima etapa; `quantity` avança só parte, dividindo a linha (RN-04.20, RN-04.21, RN-04.24)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/order-items/{id}/back": {
+      "post": {
+        "operationId": "OperationController_back",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BackItemRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemChange"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: sem acesso à estação do item."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`ITEM_CHANGED` (outro aparelho mudou o item antes: `details.item` traz o estado atual, CA-04.05), `ITEM_CANCELED`, `SHIFT_CLOSED`, `ITEM_IN_FINAL_STAGE` ou `NO_PREVIOUS_STAGE`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Volta o item para a etapa anterior, com auditoria (RN-04.22)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/order-items/{id}/cancel": {
+      "post": {
+        "operationId": "OperationController_cancelItem",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelItemRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemChange"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_QUANTITY` ou `VALIDATION_FAILED` (motivo obrigatório)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: sem acesso ao balcão nem à estação do item."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`ITEM_CHANGED` (outro aparelho mudou o item antes: `details.item` traz o estado atual, CA-04.05), `ITEM_CANCELED`, `SHIFT_CLOSED` ou `TAB_CLOSED` (RN-04.28).\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cancela o item ou parte dele, com motivo; perda depois da primeira etapa (RN-04.25 a RN-04.28)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
     "/api/v1/organization/access": {
       "get": {
         "operationId": "StaffController_access",
@@ -9942,6 +12180,409 @@
         "summary": "Marca o produto como esgotado (dono e colaboradores com estação na unidade, RN-03.11)",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/close": {
+      "post": {
+        "operationId": "OperationController_closeShift",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_HAS_PENDING_ITEMS` com `details` no formato `ShiftPendingItems` (CA-04.09) ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Fecha o turno (RN-04.07): recusa com a lista de pendências; itens ainda em preparo vão à etapa final (RN-04.08)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/prices": {
+      "put": {
+        "operationId": "OperationController_updatePrices",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutShiftPricesRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_SHIFT_PRICE` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_CLOSED` ou `VERSION_CONFLICT`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Substitui a tabela de preços do turno aberto (RN-04.06)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/tabs": {
+      "get": {
+        "operationId": "OperationController_listTabs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Situações (`TabStatus`) separadas por vírgula; padrão `open,closing`. Ex.: `open,closing,paid`.",
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "description": "Situações (`TabStatus`) separadas por vírgula; padrão `open,closing`. Ex.: `open,closing,paid`.",
+              "pattern": "^(open|closing|paid|on_credit|settled|canceled)(,(open|closing|paid|on_credit|settled|canceled))*$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TabList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem acesso à unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Varal: comandas do turno com totais e resumo dos itens, por número",
+        "tags": [
+          "operation"
+        ]
+      },
+      "post": {
+        "operationId": "OperationController_createTab",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTabRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Abre uma comanda aberta com o próximo número do turno (RN-04.09)",
+        "tags": [
+          "operation"
         ]
       }
     },
@@ -10585,6 +13226,82 @@
         ]
       }
     },
+    "/api/v1/stations/{id}/queue": {
+      "get": {
+        "operationId": "OperationController_queue",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StationQueue"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem acesso à estação."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Fila da estação: itens nela, do pedido mais antigo para o mais novo",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
     "/api/v1/support-access": {
       "get": {
         "operationId": "SupportAccessController_list",
@@ -10663,6 +13380,506 @@
         "summary": "Acessos de suporte feitos na organização (admin, motivo, início e fim)",
         "tags": [
           "support-access"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}": {
+      "get": {
+        "operationId": "OperationController_getTab",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem acesso à unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Comanda com pedidos, itens e totais",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/cancel": {
+      "post": {
+        "operationId": "OperationController_cancelTab",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelTabRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_HAS_ACTIVE_ITEMS` (`details.itemIds`), `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Cancela a comanda quando todos os itens já foram cancelados (RN-04.12)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/orders": {
+      "post": {
+        "operationId": "OperationController_createOrder",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrderRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`ORDER_REJECTED` com `details` no formato `OrderRejectedDetails` (CA-04.06, CA-03.06), `TAB_NOT_OPEN` (RN-04.13), `TAB_CLOSED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Envia um pedido à comanda aberta: 1 a 50 itens, cada item vai à estação de preparo (RN-04.16 a RN-04.19)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/reopen": {
+      "post": {
+        "operationId": "OperationController_reopen",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TabActionRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_NOT_CLOSING`, `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Reabre a comanda: `closing` → `open` (RN-04.12)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/request-bill": {
+      "post": {
+        "operationId": "OperationController_requestBill",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TabActionRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_NOT_OPEN`, `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Pede a conta: `open` → `closing` (RN-04.12)",
+        "tags": [
+          "operation"
         ]
       }
     },
@@ -11098,6 +14315,198 @@
         "summary": "Cardápio completo da unidade (dono e colaboradores da unidade)",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/shifts": {
+      "post": {
+        "operationId": "OperationController_openShift",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenShiftRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Shift"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_SHIFT_PRICE` ou `VALIDATION_FAILED` (acordo obrigatório no turno contratado)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`SHIFT_ALREADY_OPEN` (CA-04.01), `UNIT_INACTIVE`, `ORGANIZATION_SUSPENDED` ou `ORGANIZATION_CANCELED` (CA-02.05).\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Abre o turno da unidade, com tipo, acordo e preços (dono ou quem opera caixa, RN-04.02)",
+        "tags": [
+          "operation"
+        ]
+      }
+    },
+    "/api/v1/units/{id}/shifts/current": {
+      "get": {
+        "operationId": "OperationController_currentShift",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurrentShift"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: colaborador sem acesso à unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Turno aberto da unidade, com acordo e preços",
+        "tags": [
+          "operation"
         ]
       }
     },

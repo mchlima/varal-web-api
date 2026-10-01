@@ -4,7 +4,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, inject, it, vi } from
 
 import type { AuthContext } from '../../src/context/request-context.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { OpenShiftChecker } from '../../src/units/open-shift.js';
 import { DEFAULT_TEMPLATE } from '../../src/units/unit-template.service.js';
 import type { WorkflowDto } from '../../src/units/units.schemas.js';
 import { errorOf } from '../support/http.js';
@@ -454,9 +453,12 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
       const productId = (product.body as { id: string }).id;
       const workflow = await workflowOf(tenant);
 
-      vi.spyOn(app.get(OpenShiftChecker), 'hasOpenShift').mockImplementation((_db, unitId) =>
-        Promise.resolve(unitId === tenant.unitId),
-      );
+      // A real open shift (spec 04) replaces the provisional checker of spec 03.
+      await http()
+        .post(`${API}/units/${tenant.unitId}/shifts`)
+        .set(as(tenant.ownerAuth))
+        .send({ type: 'direct_sale' })
+        .expect(201);
       const refused = await Promise.all([
         http()
           .put(`${API}/units/${tenant.unitId}/workflow`)

@@ -94,32 +94,46 @@ export class OrganizationsService {
       throw AppError.of('NOT_FOUND');
     }
     const owner = row.users[0];
-    const [invites, units, activeStaffCount, lastAccess, unreadAnnouncements] = await Promise.all([
-      this.latestInvites(this.platform, owner ? [owner.id] : []),
-      this.platform.unit.findMany({
-        where: { organizationId: id },
-        orderBy: { name: 'asc' },
-        select: { id: true, name: true, active: true },
-      }),
-      this.platform.staffMember.count({ where: { organizationId: id, active: true } }),
-      this.platform.session.aggregate({
-        where: { organizationId: id, impersonationId: null },
-        _max: { lastUsedAt: true },
-      }),
-      owner
-        ? this.platform.announcement.count({
-            where: {
-              AND: [visibleAnnouncementsWhere(row, now), { reads: { none: { userId: owner.id } } }],
-            },
-          })
-        : Promise.resolve(0),
-    ]);
+    const [invites, units, activeStaffCount, lastAccess, unreadAnnouncements, recentShifts] =
+      await Promise.all([
+        this.latestInvites(this.platform, owner ? [owner.id] : []),
+        this.platform.unit.findMany({
+          where: { organizationId: id },
+          orderBy: { name: 'asc' },
+          select: { id: true, name: true, active: true },
+        }),
+        this.platform.staffMember.count({ where: { organizationId: id, active: true } }),
+        this.platform.session.aggregate({
+          where: { organizationId: id, impersonationId: null },
+          _max: { lastUsedAt: true },
+        }),
+        owner
+          ? this.platform.announcement.count({
+              where: {
+                AND: [
+                  visibleAnnouncementsWhere(row, now),
+                  { reads: { none: { userId: owner.id } } },
+                ],
+              },
+            })
+          : Promise.resolve(0),
+        // Spec 04: the last 10 shifts, newest first.
+        this.platform.shift.findMany({
+          where: { organizationId: id },
+          orderBy: [{ openedAt: 'desc' }, { id: 'desc' }],
+          take: 10,
+          select: { id: true, openedAt: true, closedAt: true },
+        }),
+      ]);
     return {
       ...this.toSummary(row, invites),
       units,
       activeStaffCount,
-      // Shifts arrive with spec 04: list the last 10 here (opened_at desc).
-      recentShifts: [],
+      recentShifts: recentShifts.map((shift) => ({
+        id: shift.id,
+        openedAt: shift.openedAt.toISOString(),
+        closedAt: shift.closedAt?.toISOString() ?? null,
+      })),
       lastAccessAt: lastAccess._max.lastUsedAt?.toISOString() ?? null,
       unreadAnnouncements,
     };

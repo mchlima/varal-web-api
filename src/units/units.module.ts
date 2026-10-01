@@ -17,7 +17,7 @@ import { WorkflowService } from './workflow.service.js';
  * - `UnitTemplateService`: default template of a new unit (RN-03.03), also for spec 02 (platform
  *   admin creating an organization);
  * - `UnitAccessService`, `OwnerGuard`: who may read or change a unit;
- * - `OpenShiftChecker`: RN-03.02 / RN-03.07, replaced by spec 04;
+ * - `OpenShiftChecker`: RN-03.02 / RN-03.07, from the shifts of spec 04;
  * - `SetupEvents`: versions and real-time events of the menu and the unit settings.
  */
 @Module({

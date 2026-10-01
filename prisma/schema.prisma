@@ -132,6 +132,67 @@ enum ImpersonationEndedBy {
   @@map("impersonation_ended_by")
 }
 
+/// Kind of shift, chosen when it opens and never changed (RN-04.04).
+enum ShiftType {
+  direct_sale
+  contracted
+
+  @@map("shift_type")
+}
+
+enum ShiftStatus {
+  open
+  closed
+
+  @@map("shift_status")
+}
+
+/// Modality of the agreement of a contracted shift (RN-04.05).
+enum AgreementModality {
+  fixed_fee
+  per_quantity
+  consumption_billed
+  other
+
+  @@map("agreement_modality")
+}
+
+/// How a tab is paid (RN-04.11): before sending (`pay_first`, spec 05) or at the end (`open_tab`).
+enum TabMode {
+  pay_first
+  open_tab
+
+  @@map("tab_mode")
+}
+
+/// Situation of a tab (RN-04.12). `paid` comes with spec 05, `on_credit` and `settled` with spec 06.
+enum TabStatus {
+  open
+  closing
+  paid
+  on_credit
+  settled
+  canceled
+
+  @@map("tab_status")
+}
+
+/// Discount of a tab (spec 05, RN-05.01).
+enum DiscountType {
+  amount
+  percent
+
+  @@map("discount_type")
+}
+
+/// `sent` while some item is in a non-final stage; `completed` when every item is final or canceled.
+enum OrderStatus {
+  sent
+  completed
+
+  @@map("order_status")
+}
+
 // ---------------------------------------------------------------------------------------------
 // Tenants
 // ---------------------------------------------------------------------------------------------
@@ -162,6 +223,14 @@ model Organization {
   announcementTargets   AnnouncementTarget[]
   announcementReads     AnnouncementRead[]
   impersonationSessions ImpersonationSession[]
+  // Spec 04 (turno e comandas).
+  shifts                Shift[]
+  shiftAgreements       ShiftAgreement[]
+  shiftPrices           ShiftPrice[]
+  tabs                  Tab[]
+  orders                Order[]
+  orderItems            OrderItem[]
+  orderItemModifiers    OrderItemModifier[]
 
   @@map("organizations")
 }
@@ -187,6 +256,9 @@ model Unit {
   workflowStages       WorkflowStage[]
   categories           Category[]
   products             Product[]
+  shifts               Shift[]
+  tabs                 Tab[]
+  orderItems           OrderItem[]
 
   @@unique([organizationId, name])
   /// Target of composite foreign keys that keep child rows in the same organization.
@@ -282,6 +354,8 @@ model Station {
   stages       WorkflowStage[]
   categories   Category[]
   products     Product[]
+  prepItems    OrderItem[]     @relation("OrderItemPrepStation")
+  queuedItems  OrderItem[]     @relation("OrderItemStation")
 
   /// Target of composite foreign keys: a station referenced by a stage, category or product is
   /// always of the same organization and unit.
@@ -312,7 +386,10 @@ model WorkflowStage {
   organization Organization @relation(fields: [organizationId], references: [id])
   unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
   station      Station?     @relation(fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id], onDelete: Restrict)
+  orderItems   OrderItem[]
 
+  /// Target of the composite foreign key of `order_items.stage_id` (spec 04).
+  @@unique([organizationId, unitId, id])
   @@index([organizationId, unitId])
   @@map("workflow_stages")
 }
@@ -364,6 +441,8 @@ model Product {
   category       Category        @relation(fields: [organizationId, unitId, categoryId], references: [organizationId, unitId, id])
   station        Station?        @relation(fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id], onDelete: Restrict)
   modifierGroups ModifierGroup[]
+  shiftPrices    ShiftPrice[]
+  orderItems     OrderItem[]
 
   @@unique([organizationId, id])
   @@index([organizationId, unitId])
@@ -410,6 +489,234 @@ model Modifier {
 
   @@index([organizationId, modifierGroupId])
   @@map("modifiers")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Shifts, tabs and orders (spec 04)
+// ---------------------------------------------------------------------------------------------
+
+/// A work period of a unit (spec 04, section 3). At most one open shift per unit (RN-04.01).
+/// SQL-only: UNIQUE (unit_id) WHERE status = 'open'; CHECK next_tab_number >= 1;
+/// CHECK (status = 'closed') = (closed_at IS NOT NULL).
+model Shift {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  unitId         String      @map("unit_id") @db.Uuid
+  type           ShiftType
+  status         ShiftStatus @default(open)
+  openedByType   ActorType   @map("opened_by_type")
+  openedById     String?     @map("opened_by_id") @db.Uuid
+  openedAt       DateTime    @map("opened_at") @db.Timestamptz(3)
+  closedByType   ActorType?  @map("closed_by_type")
+  closedById     String?     @map("closed_by_id") @db.Uuid
+  closedAt       DateTime?   @map("closed_at") @db.Timestamptz(3)
+  /// Number of the next tab (RN-04.09): incremented under the row lock, so two counters never get
+  /// the same number (CA-04.02).
+  nextTabNumber  Int         @default(1) @map("next_tab_number")
+  /// Incremented on every change of the shift (prices, closing): version of `shift.*` events.
+  version        Int         @default(0)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization    @relation(fields: [organizationId], references: [id])
+  unit         Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  agreement    ShiftAgreement?
+  prices       ShiftPrice[]
+  tabs         Tab[]
+  orders       Order[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, unitId, openedAt])
+  @@map("shifts")
+}
+
+/// Agreement of a contracted shift (RN-04.05). Informative in the MVP.
+/// SQL-only: CHECK agreed_amount_cents >= 0; CHECK agreed_quantity >= 1.
+model ShiftAgreement {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  organizationId    String            @map("organization_id") @db.Uuid
+  shiftId           String            @map("shift_id") @db.Uuid
+  contractorName    String            @map("contractor_name")
+  modality          AgreementModality
+  agreedAmountCents Int?              @map("agreed_amount_cents")
+  agreedQuantity    Int?              @map("agreed_quantity")
+  limits            String?
+  notes             String?
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+
+  /// One agreement per shift.
+  @@unique([organizationId, shiftId])
+  @@map("shift_agreements")
+}
+
+/// Price of a product in one shift (RN-04.06); other products keep the menu price.
+/// SQL-only: CHECK price_cents >= 0.
+model ShiftPrice {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  shiftId        String   @map("shift_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  priceCents     Int      @map("price_cents")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  product      Product      @relation(fields: [organizationId, productId], references: [organizationId, id])
+
+  @@unique([shiftId, productId])
+  @@index([organizationId, shiftId])
+  @@map("shift_prices")
+}
+
+/// A tab (comanda, spec 04, section 4). Never deleted: canceled (RN-04.12).
+/// `customer_id` (fiado) arrives with spec 06; the discount is applied by spec 05.
+/// SQL-only: CHECK char_length(customer_name) BETWEEN 1 AND 40; CHECK number >= 1;
+/// CHECK discount_value >= 0; CHECK (discount_type IS NULL) = (discount_value IS NULL).
+model Tab {
+  id             String        @id @default(uuid(7)) @db.Uuid
+  organizationId String        @map("organization_id") @db.Uuid
+  shiftId        String        @map("shift_id") @db.Uuid
+  unitId         String        @map("unit_id") @db.Uuid
+  /// Sequential in the shift, from 1 (RN-04.09).
+  number         Int
+  customerName   String        @map("customer_name")
+  mode           TabMode
+  status         TabStatus
+  discountType   DiscountType? @map("discount_type")
+  discountValue  Int?          @map("discount_value")
+  discountReason String?       @map("discount_reason")
+  openedByType   ActorType     @map("opened_by_type")
+  openedById     String?       @map("opened_by_id") @db.Uuid
+  /// When it left `open`/`closing` for good (paid, on credit, canceled).
+  closedAt       DateTime?     @map("closed_at") @db.Timestamptz(3)
+  /// Concurrency and version of `tab.*` events: incremented on status, orders and totals changes.
+  version        Int           @default(0)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  orders       Order[]
+  items        OrderItem[]
+
+  @@unique([shiftId, number])
+  @@unique([organizationId, id])
+  @@index([organizationId, shiftId, status])
+  @@map("tabs")
+}
+
+/// An order sent from the counter (spec 04, section 5). Never deleted.
+/// SQL-only: CHECK number_in_tab >= 1; CHECK (status = 'completed') = (completed_at IS NOT NULL).
+model Order {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  tabId          String      @map("tab_id") @db.Uuid
+  shiftId        String      @map("shift_id") @db.Uuid
+  /// 1, 2, 3… in the tab.
+  numberInTab    Int         @map("number_in_tab")
+  status         OrderStatus @default(sent)
+  createdByType  ActorType   @map("created_by_type")
+  createdById    String?     @map("created_by_id") @db.Uuid
+  sentAt         DateTime    @map("sent_at") @db.Timestamptz(3)
+  completedAt    DateTime?   @map("completed_at") @db.Timestamptz(3)
+  /// Version of `order.*` events.
+  version        Int         @default(0)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  tab          Tab          @relation(fields: [organizationId, tabId], references: [organizationId, id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  items        OrderItem[]
+
+  @@unique([tabId, numberInTab])
+  @@unique([organizationId, id])
+  @@index([organizationId, tabId])
+  @@map("orders")
+}
+
+/// One line of an order with a copy of what was sold (RN-04.18): name, unit price of the moment and
+/// preparation station. Splitting a line (advance part of it, RN-04.24, or cancel part of it,
+/// RN-04.26) creates a new line pointing to the original in `split_from_id`.
+/// `station_id` is the station where the line shows up now (from the stage, spec 03 section 4.2),
+/// null in the final stage or when canceled. Never deleted.
+/// SQL-only: CHECK quantity BETWEEN 1 AND 99; CHECK unit_price_cents >= 0;
+/// CHECK note IS NULL OR char_length(note) <= 140; CHECK cancel_reason length <= 140;
+/// CHECK (canceled_at IS NULL) = (cancel_reason IS NULL); CHECK canceled lines have no station.
+model OrderItem {
+  id             String     @id @default(uuid(7)) @db.Uuid
+  organizationId String     @map("organization_id") @db.Uuid
+  orderId        String     @map("order_id") @db.Uuid
+  tabId          String     @map("tab_id") @db.Uuid
+  unitId         String     @map("unit_id") @db.Uuid
+  productId      String     @map("product_id") @db.Uuid
+  productName    String     @map("product_name")
+  unitPriceCents Int        @map("unit_price_cents")
+  quantity       Int
+  note           String?
+  /// Position of the line in the order as sent (split lines keep the position of the original).
+  position       Int
+  prepStationId  String     @map("prep_station_id") @db.Uuid
+  stageId        String     @map("stage_id") @db.Uuid
+  stationId      String?    @map("station_id") @db.Uuid
+  stageEnteredAt DateTime   @map("stage_entered_at") @db.Timestamptz(3)
+  canceledAt     DateTime?  @map("canceled_at") @db.Timestamptz(3)
+  canceledByType ActorType? @map("canceled_by_type")
+  canceledById   String?    @map("canceled_by_id") @db.Uuid
+  cancelReason   String?    @map("cancel_reason")
+  /// Canceled after leaving the first stage (RN-04.27).
+  wasted         Boolean    @default(false)
+  splitFromId    String?    @map("split_from_id") @db.Uuid
+  /// Optimistic concurrency of every stage change and cancellation (`ITEM_CHANGED`).
+  version        Int        @default(0)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  order        Order               @relation(fields: [organizationId, orderId], references: [organizationId, id])
+  tab          Tab                 @relation(fields: [organizationId, tabId], references: [organizationId, id])
+  unit         Unit                @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  product      Product             @relation(fields: [organizationId, productId], references: [organizationId, id])
+  stage        WorkflowStage       @relation(fields: [organizationId, unitId, stageId], references: [organizationId, unitId, id])
+  prepStation  Station             @relation("OrderItemPrepStation", fields: [organizationId, unitId, prepStationId], references: [organizationId, unitId, id])
+  station      Station?            @relation("OrderItemStation", fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id])
+  splitFrom    OrderItem?          @relation("OrderItemSplit", fields: [organizationId, splitFromId], references: [organizationId, id])
+  splits       OrderItem[]         @relation("OrderItemSplit")
+  modifiers    OrderItemModifier[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, orderId])
+  @@index([organizationId, tabId])
+  @@index([organizationId, stationId])
+  @@map("order_items")
+}
+
+/// Copy of a chosen modifier (RN-04.18). `modifier_id` has no foreign key: modifier groups can be
+/// deleted from the menu (spec 03, section 5.2), and the item keeps its copy.
+/// SQL-only: CHECK price_delta_cents >= 0.
+model OrderItemModifier {
+  id              String   @id @default(uuid(7)) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  orderItemId     String   @map("order_item_id") @db.Uuid
+  modifierId      String   @map("modifier_id") @db.Uuid
+  groupName       String   @map("group_name")
+  modifierName    String   @map("modifier_name")
+  priceDeltaCents Int      @map("price_delta_cents")
+  /// Order of the copy (group order, then option order of the menu at the moment of the sale).
+  position        Int
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  orderItem    OrderItem    @relation(fields: [organizationId, orderItemId], references: [organizationId, id])
+
+  @@index([organizationId, orderItemId])
+  @@map("order_item_modifiers")
 }
 
 // ---------------------------------------------------------------------------------------------
