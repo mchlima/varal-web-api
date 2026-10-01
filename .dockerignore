@@ -1,0 +1,15 @@
+.git
+.github
+.githooks
+.claude
+.worktrees
+node_modules
+dist
+coverage
+src/generated
+test
+.env
+.env.*
+!.env.example
+*.log
+*.md
