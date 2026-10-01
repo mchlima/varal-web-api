@@ -42,7 +42,7 @@ export const AdminUserPageSchema = pageSchema('AdminUserPage', AdminUserSchema);
 export const AdminUserListQuerySchema = PaginationQuerySchema.extend({
   search: SearchSchema.meta({ description: 'Parte do nome ou do e-mail.' }),
   active: QueryFlagSchema,
-}).meta({ id: 'AdminUserListQuery' });
+});
 
 const RoleIdsSchema = z.array(z.uuid()).max(50);
 

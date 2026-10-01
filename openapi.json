@@ -4801,7 +4801,39 @@
     "/api/v1/admin/announcements": {
       "get": {
         "operationId": "AnnouncementsController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/AnnouncementStatus"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5231,7 +5263,123 @@
     "/api/v1/admin/audit-logs": {
       "get": {
         "operationId": "AuditLogsController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organizationId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actorType",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ActorType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actorId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "impersonatorId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Ação exata (`organization.suspended`) ou prefixo terminado em ponto (`organization.`).",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "description": "Ação exata (`organization.suspended`) ou prefixo terminado em ponto (`organization.`).",
+              "maxLength": 100,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityType",
+            "required": false,
+            "schema": {
+              "maxLength": 60,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "entityId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "A partir deste instante (inclusive).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "A partir deste instante (inclusive).",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Antes deste instante.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Antes deste instante.",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5662,7 +5810,81 @@
     "/api/v1/admin/emails": {
       "get": {
         "operationId": "AdminEmailsController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/EmailType"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/EmailStatus"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organizationId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Criados a partir deste instante (inclusive).",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Criados a partir deste instante (inclusive).",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Criados antes deste instante.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Criados antes deste instante.",
+              "format": "date-time",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5722,7 +5944,19 @@
     "/api/v1/admin/emails/usage": {
       "get": {
         "operationId": "AdminEmailsController_usage",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Mês em `America/Sao_Paulo` (AAAA-MM). Padrão: o mês atual.",
+            "in": "query",
+            "name": "month",
+            "required": false,
+            "schema": {
+              "description": "Mês em `America/Sao_Paulo` (AAAA-MM). Padrão: o mês atual.",
+              "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5782,7 +6016,67 @@
     "/api/v1/admin/impersonations": {
       "get": {
         "operationId": "ImpersonationsController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "organizationId",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Só os acessos do admin logado.",
+            "in": "query",
+            "name": "mine",
+            "required": false,
+            "schema": {
+              "description": "Só os acessos do admin logado.",
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -5979,7 +6273,61 @@
     "/api/v1/admin/metrics/organizations": {
       "get": {
         "operationId": "MetricsController_organizations",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "shifts",
+                "tabs",
+                "soldCents",
+                "lastAccessAt"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "default": "asc",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6039,7 +6387,32 @@
     "/api/v1/admin/metrics/overview": {
       "get": {
         "operationId": "MetricsController_overview",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -6099,7 +6472,50 @@
     "/api/v1/admin/organizations": {
       "get": {
         "operationId": "OrganizationsController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Parte do nome da organização ou do e-mail do dono, ou o código do estabelecimento.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "description": "Parte do nome da organização ou do e-mail do dono, ou o código do estabelecimento.",
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SubscriptionStatus"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -7021,7 +7437,54 @@
     "/api/v1/admin/users": {
       "get": {
         "operationId": "AdminUsersController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Parte do nome ou do e-mail.",
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "description": "Parte do nome ou do e-mail.",
+              "maxLength": 120,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "enum": [
+                "true",
+                "false"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -9485,7 +9948,31 @@
     "/api/v1/staff": {
       "get": {
         "operationId": "StaffController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10101,7 +10588,31 @@
     "/api/v1/support-access": {
       "get": {
         "operationId": "SupportAccessController_list",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10158,7 +10669,31 @@
     "/api/v1/units": {
       "get": {
         "operationId": "UnitsController_listUnits",
-        "parameters": [],
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {

@@ -61,7 +61,7 @@ export const AnnouncementPageSchema = pageSchema('AnnouncementPage', Announcemen
 
 export const AnnouncementListQuerySchema = PaginationQuerySchema.extend({
   status: AnnouncementStatusSchema.optional(),
-}).meta({ id: 'AnnouncementListQuery' });
+});
 
 interface AudienceInput {
   audienceType?: 'all' | 'by_status' | 'selected' | undefined;

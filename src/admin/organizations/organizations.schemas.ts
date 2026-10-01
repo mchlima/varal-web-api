@@ -64,7 +64,7 @@ export const OrganizationListQuerySchema = PaginationQuerySchema.extend({
       'Parte do nome da organização ou do e-mail do dono, ou o código do estabelecimento.',
   }),
   status: SubscriptionStatusSchema.optional(),
-}).meta({ id: 'OrganizationListQuery' });
+});
 
 export const OrganizationUnitSchema = z
   .object({ id: z.uuid(), name: z.string(), active: z.boolean() })

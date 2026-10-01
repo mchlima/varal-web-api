@@ -51,7 +51,7 @@ export const AuditLogListQuerySchema = PaginationQuerySchema.extend({
   entityId: z.uuid().optional(),
   from: InstantFilterSchema.meta({ description: 'A partir deste instante (inclusive).' }),
   to: InstantFilterSchema.meta({ description: 'Antes deste instante.' }),
-}).meta({ id: 'AuditLogListQuery' });
+});
 
 /** Audit search (spec 02, section 8): newest first, with the changes of each entry. Read-only. */
 @ApiTags('admin-audit')
