@@ -34,6 +34,11 @@ export const TENANT_MODELS = {
   Order: 'organizationId',
   OrderItem: 'organizationId',
   OrderItemModifier: 'organizationId',
+  // Spec 05: cash registers, movements, counts and payments.
+  CashRegister: 'organizationId',
+  CashMovement: 'organizationId',
+  CashRegisterCount: 'organizationId',
+  Payment: 'organizationId',
 } as const satisfies Partial<Record<Prisma.ModelName, string>>;
 
 export type TenantModel = keyof typeof TENANT_MODELS;

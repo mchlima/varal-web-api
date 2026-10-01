@@ -12,9 +12,11 @@ import type { ActorType } from '../generated/prisma/enums.js';
 import { AppError } from '../errors/app-error.js';
 import type { TenantDb } from '../prisma/prisma.service.js';
 import { isLate, lateAtOf, lineTotalCents, tabTotals } from './order-rules.js';
+import { paidCents } from './payment-rules.js';
 import type {
   OrderDto,
   OrderItemDto,
+  PaymentDto,
   ShiftDto,
   TabDto,
   TabSummaryDto,
@@ -206,6 +208,10 @@ export async function loadTabSummaries(
     where: { tabId: { in: tabs.map((tab) => tab.id) } },
     include: itemInclude,
   });
+  const payments = await db.payment.findMany({
+    where: { tabId: { in: tabs.map((tab) => tab.id) }, reversedAt: null },
+    select: { tabId: true, amountCents: true, reversedAt: true },
+  });
   const flows = new Map<string, UnitFlow>();
   for (const unitId of new Set(tabs.map((tab) => tab.unitId))) {
     flows.set(unitId, await loadUnitFlow(db, unitId));
@@ -213,7 +219,8 @@ export async function loadTabSummaries(
   return tabs.map((tab) => {
     const flow = flows.get(tab.unitId);
     const lines = items.filter((item) => item.tabId === tab.id);
-    return toTabSummary(tab, lines, flow, now);
+    const paid = paidCents(payments.filter((payment) => payment.tabId === tab.id));
+    return toTabSummary(tab, lines, flow, paid, now);
   });
 }
 
@@ -221,6 +228,7 @@ function toTabSummary(
   tab: Tab,
   lines: readonly ItemRow[],
   flow: UnitFlow | undefined,
+  paid: number,
   now: Date,
 ): TabSummaryDto {
   const totals = tabTotals(lines, { type: tab.discountType, value: tab.discountValue });
@@ -253,6 +261,9 @@ function toTabSummary(
         ),
       ),
     ),
+    discountReason: tab.discountReason,
+    paidCents: paid,
+    balanceCents: totals.totalCents - paid,
     openedAt: tab.createdAt.toISOString(),
     openedBy: actorRef(tab.openedByType, tab.openedById),
     closedAt: tab.closedAt?.toISOString() ?? null,
@@ -281,7 +292,48 @@ export async function loadTab(db: TenantDb, tabId: string, now = new Date()): Pr
   const summary = await loadTabSummary(db, tabId, now);
   const flow = await loadUnitFlow(db, summary.unitId);
   const orders = await loadOrders(db, { tabId }, flow.lateAfterMinutes, now);
-  return { ...summary, orders };
+  const payments = await loadPayments(db, { tabId });
+  return { ...summary, orders, payments };
+}
+
+export const paymentInclude = {
+  tab: { select: { number: true, customerName: true } },
+} satisfies Prisma.PaymentInclude;
+
+export type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>;
+
+export function toPaymentDto(row: PaymentRow): PaymentDto {
+  return {
+    id: row.id,
+    tabId: row.tabId,
+    tabNumber: row.tab.number,
+    customerName: row.tab.customerName,
+    shiftId: row.shiftId,
+    cashRegisterId: row.cashRegisterId,
+    method: row.method,
+    amountCents: row.amountCents,
+    tenderedCents: row.tenderedCents,
+    changeCents: row.changeCents,
+    isCreditSettlement: row.isCreditSettlement,
+    receivedBy: actorRef(row.receivedByType, row.receivedById),
+    createdAt: row.createdAt.toISOString(),
+    reversedAt: row.reversedAt?.toISOString() ?? null,
+    reversedBy: row.reversedByType === null ? null : actorRef(row.reversedByType, row.reversedById),
+    reversalReason: row.reversalReason,
+  };
+}
+
+/** Payments in the order they were registered (UUID v7), reversed ones included. */
+export async function loadPayments(
+  db: TenantDb,
+  where: Prisma.PaymentWhereInput,
+): Promise<PaymentDto[]> {
+  const rows = await db.payment.findMany({
+    where,
+    include: paymentInclude,
+    orderBy: { id: 'asc' },
+  });
+  return rows.map(toPaymentDto);
 }
 
 type ShiftRow = Shift & { agreement: ShiftAgreement | null; prices: ShiftPrice[] };

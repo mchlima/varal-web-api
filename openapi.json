@@ -863,6 +863,426 @@
         },
         "type": "object"
       },
+      "CashBreakdown": {
+        "additionalProperties": false,
+        "description": "Dinheiro esperado = fundo + pagamentos + suprimentos − sangrias (RN-05.19).",
+        "properties": {
+          "depositsCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "openingFloatCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "paymentsCents": {
+            "description": "Pagamentos em dinheiro aplicados, sem estornos.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "withdrawalsCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "openingFloatCents",
+          "paymentsCents",
+          "depositsCents",
+          "withdrawalsCents"
+        ],
+        "type": "object"
+      },
+      "CashMovement": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "cashRegisterId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "createdBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CashMovementType"
+          }
+        },
+        "required": [
+          "id",
+          "cashRegisterId",
+          "type",
+          "amountCents",
+          "reason",
+          "createdBy",
+          "createdAt"
+        ],
+        "type": "object"
+      },
+      "CashMovementRequestInput": {
+        "properties": {
+          "amountCents": {
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Motivo, obrigatório (RN-05.18).",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/CashMovementType"
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "amountCents",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "CashMovementType": {
+        "description": "`withdrawal`: sangria; `deposit`: suprimento (RN-05.18).",
+        "enum": [
+          "withdrawal",
+          "deposit"
+        ],
+        "type": "string"
+      },
+      "CashRegister": {
+        "additionalProperties": false,
+        "description": "Caixa do turno com o esperado por forma.",
+        "properties": {
+          "cash": {
+            "$ref": "#/components/schemas/CashBreakdown"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closingNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counts": {
+            "description": "Conferência gravada no fechamento (vazia enquanto aberto).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterCount"
+            },
+            "type": "array"
+          },
+          "expected": {
+            "description": "Esperado por forma, na ordem `cash`, `pix`, `credit_card`, `debit_card` (tabela da seção 5).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterExpected"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef",
+            "description": "Responsável: quem abriu (RN-05.17)."
+          },
+          "openingFloatCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CashRegisterStatus"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "unitId",
+          "name",
+          "status",
+          "openingFloatCents",
+          "openedBy",
+          "openedAt",
+          "closedBy",
+          "closedAt",
+          "closingNote",
+          "expected",
+          "cash",
+          "counts",
+          "version"
+        ],
+        "type": "object"
+      },
+      "CashRegisterCount": {
+        "additionalProperties": false,
+        "properties": {
+          "differenceCents": {
+            "description": "Informado − esperado (RN-05.20).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "expectedCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "informedCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          }
+        },
+        "required": [
+          "method",
+          "expectedCents",
+          "informedCents",
+          "differenceCents"
+        ],
+        "type": "object"
+      },
+      "CashRegisterDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "cash": {
+            "$ref": "#/components/schemas/CashBreakdown"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closingNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counts": {
+            "description": "Conferência gravada no fechamento (vazia enquanto aberto).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterCount"
+            },
+            "type": "array"
+          },
+          "expected": {
+            "description": "Esperado por forma, na ordem `cash`, `pix`, `credit_card`, `debit_card` (tabela da seção 5).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterExpected"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "movements": {
+            "items": {
+              "$ref": "#/components/schemas/CashMovement"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef",
+            "description": "Responsável: quem abriu (RN-05.17)."
+          },
+          "openingFloatCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "payments": {
+            "description": "Pagamentos recebidos neste caixa, inclusive os estornados.",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            },
+            "type": "array"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CashRegisterStatus"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "unitId",
+          "name",
+          "status",
+          "openingFloatCents",
+          "openedBy",
+          "openedAt",
+          "closedBy",
+          "closedAt",
+          "closingNote",
+          "expected",
+          "cash",
+          "counts",
+          "version",
+          "movements",
+          "payments"
+        ],
+        "type": "object"
+      },
+      "CashRegisterExpected": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          }
+        },
+        "required": [
+          "method",
+          "expectedCents"
+        ],
+        "type": "object"
+      },
+      "CashRegisterList": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CashRegister"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "type": "object"
+      },
+      "CashRegisterStatus": {
+        "description": "`open` recebe pagamentos e movimentos; `closed` não volta a abrir (RN-05.21).",
+        "enum": [
+          "open",
+          "closed"
+        ],
+        "type": "string"
+      },
       "Category": {
         "additionalProperties": false,
         "properties": {
@@ -954,6 +1374,48 @@
         "required": [
           "currentPassword",
           "newPassword"
+        ],
+        "type": "object"
+      },
+      "CloseCashRegisterRequestInput": {
+        "properties": {
+          "counts": {
+            "description": "Valor conferido de cada forma (`cash`, `pix`, `credit_card`, `debit_card`), uma vez cada (RN-05.20).",
+            "items": {
+              "properties": {
+                "informedCents": {
+                  "maximum": 100000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "method": {
+                  "$ref": "#/components/schemas/PaymentMethod"
+                }
+              },
+              "required": [
+                "method",
+                "informedCents"
+              ],
+              "type": "object"
+            },
+            "maxItems": 4,
+            "minItems": 4,
+            "type": "array"
+          },
+          "note": {
+            "description": "Observação; obrigatória quando alguma diferença não é zero.",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão que o app tem do registro. Se outro aparelho alterou antes, a API responde 409 `VERSION_CONFLICT` com `details.currentVersion`. Opcional.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "counts"
         ],
         "type": "object"
       },
@@ -1277,6 +1739,42 @@
           "name",
           "unitName",
           "owner"
+        ],
+        "type": "object"
+      },
+      "CreatePaymentRequestInput": {
+        "description": "`amountCents` para Pix e cartões; `tenderedCents` para dinheiro.",
+        "properties": {
+          "amountCents": {
+            "description": "Pix e cartões: valor, nunca maior que o saldo (RN-05.08).",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "cashRegisterId": {
+            "description": "Caixa que recebe (RN-05.05). Opcional com um único caixa aberto no turno; obrigatório com mais de um (`CASH_REGISTER_REQUIRED`).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "tenderedCents": {
+            "description": "Dinheiro: valor entregue pelo cliente. Aplica-se o menor entre ele e o saldo; o resto é troco (RN-05.09).",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "method"
         ],
         "type": "object"
       },
@@ -1758,6 +2256,135 @@
         },
         "required": [
           "error"
+        ],
+        "type": "object"
+      },
+      "EventCashRegisterClosed": {
+        "additionalProperties": false,
+        "description": "Caixa fechado, com a conferência em `counts` (sala `unit`, spec 05).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CashRegister"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "cash_register.closed",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventCashRegisterOpened": {
+        "additionalProperties": false,
+        "description": "Caixa aberto no turno (sala `unit`, spec 05). `version` é a do caixa.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CashRegister"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "cash_register.opened",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
+        ],
+        "type": "object"
+      },
+      "EventCashRegisterUpdated": {
+        "additionalProperties": false,
+        "description": "Esperado do caixa mudou: pagamento, estorno, sangria ou suprimento (sala `unit`, spec 05).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CashRegister"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "organizationId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "type": {
+            "const": "cash_register.updated",
+            "type": "string"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão do recurso. O app ignora eventos com versão menor que a do estado que já tem.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "organizationId",
+          "unitId",
+          "occurredAt",
+          "version",
+          "data"
         ],
         "type": "object"
       },
@@ -2422,7 +3049,7 @@
       },
       "EventTabUpdated": {
         "additionalProperties": false,
-        "description": "Comanda com situação, totais e `version` novos (sala `unit`): pedido novo, item cancelado, pedir a conta, reabrir, cancelar.",
+        "description": "Comanda com situação, totais, saldo, contadores e `version` novos (sala `unit`): pedido novo, item cancelado, pedir a conta, reabrir, cancelar, desconto, pagamento e estorno (spec 05), e mudança de etapa que altere `readyItemCount` ou `lateItemCount`.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/TabSummary"
@@ -3172,6 +3799,26 @@
         ],
         "type": "object"
       },
+      "OpenCashRegisterRequestInput": {
+        "properties": {
+          "name": {
+            "description": "Padrão: \"Caixa 1\", \"Caixa 2\"… (RN-05.17).",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "openingFloatCents": {
+            "description": "Fundo de troco em dinheiro, zero ou mais (RN-05.17).",
+            "maximum": 100000000,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "openingFloatCents"
+        ],
+        "type": "object"
+      },
       "OpenShiftRequestInput": {
         "properties": {
           "agreement": {
@@ -3263,7 +3910,7 @@
         "type": "object"
       },
       "OperationErrorCode": {
-        "description": "Códigos de erro da operação (spec 04): turno, comandas, pedidos e itens. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.",
+        "description": "Códigos de erro da operação (specs 04 e 05): turno, comandas, pedidos, itens, descontos, pagamentos e caixas. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.",
         "enum": [
           "SHIFT_ALREADY_OPEN",
           "UNIT_INACTIVE",
@@ -3280,7 +3927,22 @@
           "ITEM_CANCELED",
           "ITEM_IN_FINAL_STAGE",
           "NO_PREVIOUS_STAGE",
-          "INVALID_QUANTITY"
+          "INVALID_QUANTITY",
+          "NO_CASH_REGISTER_OPEN",
+          "CASH_REGISTER_REQUIRED",
+          "INVALID_CASH_REGISTER",
+          "CASH_REGISTER_CLOSED",
+          "CASH_REGISTER_NAME_TAKEN",
+          "WITHDRAWAL_EXCEEDS_CASH",
+          "CLOSING_NOTE_REQUIRED",
+          "PAYMENT_EXCEEDS_BALANCE",
+          "TAB_NOTHING_TO_PAY",
+          "PAYMENT_INSUFFICIENT",
+          "PAYMENT_ALREADY_REVERSED",
+          "TAB_PAYMENTS_EXCEED_TOTAL",
+          "TAB_HAS_PAYMENTS",
+          "TAB_PAID",
+          "TAB_PAY_FIRST"
         ],
         "type": "string"
       },
@@ -4424,6 +5086,263 @@
         ],
         "type": "object"
       },
+      "PayFirstPaymentInput": {
+        "properties": {
+          "amountCents": {
+            "description": "Pix e cartões: valor, nunca maior que o saldo (RN-05.08).",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "tenderedCents": {
+            "description": "Dinheiro: valor entregue pelo cliente. Aplica-se o menor entre ele e o saldo; o resto é troco (RN-05.09).",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "method"
+        ],
+        "type": "object"
+      },
+      "PayFirstRequestInput": {
+        "description": "Comanda paga antes (RN-05.12): comanda, pedido e pagamentos numa única operação. O pedido só vai às estações com o pagamento registrado (CA-04.10).",
+        "properties": {
+          "cashRegisterId": {
+            "description": "Caixa que recebe (RN-05.05). Opcional com um único caixa aberto no turno; obrigatório com mais de um (`CASH_REGISTER_REQUIRED`).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "customerName": {
+            "description": "Nome do cliente, de 1 a 40 caracteres (RN-04.10).",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "properties": {
+                "modifierIds": {
+                  "default": [],
+                  "items": {
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                    "type": "string"
+                  },
+                  "maxItems": 50,
+                  "type": "array"
+                },
+                "note": {
+                  "anyOf": [
+                    {
+                      "maxLength": 140,
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Observação livre, até 140 caracteres."
+                },
+                "productId": {
+                  "format": "uuid",
+                  "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                  "type": "string"
+                },
+                "quantity": {
+                  "maximum": 99,
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "productId",
+                "quantity"
+              ],
+              "type": "object"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "type": "array"
+          },
+          "payments": {
+            "description": "Pagamentos, aplicados na ordem enviada. A soma precisa cobrir o total; senão nada é gravado (CA-05.09).",
+            "items": {
+              "$ref": "#/components/schemas/PayFirstPaymentInput"
+            },
+            "maxItems": 10,
+            "type": "array"
+          }
+        },
+        "required": [
+          "customerName",
+          "items",
+          "payments"
+        ],
+        "type": "object"
+      },
+      "Payment": {
+        "additionalProperties": false,
+        "description": "Pagamento registrado (spec 05, seção 4).",
+        "properties": {
+          "amountCents": {
+            "description": "Valor aplicado à comanda (RN-05.09).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "cashRegisterId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "changeCents": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Só dinheiro: troco (`tenderedCents − amountCents`), exibido em destaque."
+          },
+          "createdAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "isCreditSettlement": {
+            "description": "Quitação de fiado (spec 06).",
+            "type": "boolean"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "receivedBy": {
+            "$ref": "#/components/schemas/ActorRef"
+          },
+          "reversalReason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "reversedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estornado (RN-05.15): o pagamento continua registrado e sai do saldo e do caixa."
+          },
+          "reversedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "shiftId": {
+            "description": "Turno em que o dinheiro entrou.",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabNumber": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tenderedCents": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Só dinheiro: valor entregue pelo cliente."
+          }
+        },
+        "required": [
+          "id",
+          "tabId",
+          "tabNumber",
+          "customerName",
+          "shiftId",
+          "cashRegisterId",
+          "method",
+          "amountCents",
+          "tenderedCents",
+          "changeCents",
+          "isCreditSettlement",
+          "receivedBy",
+          "createdAt",
+          "reversedAt",
+          "reversedBy",
+          "reversalReason"
+        ],
+        "type": "object"
+      },
+      "PaymentMethod": {
+        "description": "Forma de pagamento, só registrada (RN-05.04): `pix`, `cash` (dinheiro, com troco), `credit_card`, `debit_card`.",
+        "enum": [
+          "pix",
+          "cash",
+          "credit_card",
+          "debit_card"
+        ],
+        "type": "string"
+      },
+      "PaymentResult": {
+        "additionalProperties": false,
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/Payment"
+          },
+          "tab": {
+            "$ref": "#/components/schemas/Tab",
+            "description": "A comanda depois do pagamento (`paid` com saldo zero)."
+          }
+        },
+        "required": [
+          "payment",
+          "tab"
+        ],
+        "type": "object"
+      },
       "Permission": {
         "description": "Permissão do admin da plataforma (`recurso:ação`, spec 02, seção 3.2). Catálogo fixo no código da API (RN-02.03).",
         "enum": [
@@ -4602,6 +5521,43 @@
             "type": "string"
           }
         },
+        "type": "object"
+      },
+      "PutDiscountRequestInput": {
+        "description": "Aplica ou substitui o desconto da comanda (RN-05.01).",
+        "properties": {
+          "reason": {
+            "description": "Motivo, obrigatório (RN-05.01).",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "description": "`amount` (centavos) ou `percent`.",
+            "enum": [
+              "amount",
+              "percent"
+            ],
+            "type": "string"
+          },
+          "value": {
+            "description": "Centavos (`amount`) ou percentual de 1 a 100 (`percent`), calculado sobre o subtotal e arredondado para baixo (RN-05.03).",
+            "maximum": 100000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "type",
+          "value",
+          "reason"
+        ],
         "type": "object"
       },
       "PutShiftPricesRequestInput": {
@@ -4810,6 +5766,26 @@
         ],
         "type": "object"
       },
+      "RemoveDiscountRequestInput": {
+        "properties": {
+          "reason": {
+            "description": "Motivo da remoção (RN-05.01).",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.",
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "ResetPasswordRequestInput": {
         "properties": {
           "password": {
@@ -4828,6 +5804,20 @@
         "required": [
           "token",
           "password"
+        ],
+        "type": "object"
+      },
+      "ReversePaymentRequestInput": {
+        "properties": {
+          "reason": {
+            "description": "Motivo do estorno (RN-05.13).",
+            "maxLength": 140,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
         ],
         "type": "object"
       },
@@ -5176,7 +6166,7 @@
         "description": "`details` do 409 `SHIFT_HAS_PENDING_ITEMS` ao fechar o turno (RN-04.07, CA-04.09).",
         "properties": {
           "cashRegisters": {
-            "description": "Caixas ainda abertos (spec 05; vazio até os caixas existirem).",
+            "description": "Caixas do turno ainda abertos (spec 05).",
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -5802,6 +6792,12 @@
         "additionalProperties": false,
         "description": "Comanda com pedidos, itens e totais.",
         "properties": {
+          "balanceCents": {
+            "description": "Saldo a receber: `totalCents − paidCents` (RN-05.07).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "closedAt": {
             "anyOf": [
               {
@@ -5821,6 +6817,13 @@
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
             "type": "integer"
+          },
+          "discountReason": {
+            "description": "Motivo do desconto (RN-05.01).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "discountType": {
             "anyOf": [
@@ -5884,6 +6887,19 @@
             },
             "type": "array"
           },
+          "paidCents": {
+            "description": "Soma dos pagamentos não estornados (RN-05.07).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "payments": {
+            "description": "Pagamentos da comanda, inclusive os estornados, do primeiro ao último.",
+            "items": {
+              "$ref": "#/components/schemas/Payment"
+            },
+            "type": "array"
+          },
           "readyItemCount": {
             "description": "Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.",
             "maximum": 9007199254740991,
@@ -5937,11 +6953,15 @@
           "itemCount",
           "readyItemCount",
           "lateItemCount",
+          "discountReason",
+          "paidCents",
+          "balanceCents",
           "openedAt",
           "openedBy",
           "closedAt",
           "version",
-          "orders"
+          "orders",
+          "payments"
         ],
         "type": "object"
       },
@@ -5995,6 +7015,12 @@
         "additionalProperties": false,
         "description": "Cartão da comanda no varal do balcão.",
         "properties": {
+          "balanceCents": {
+            "description": "Saldo a receber: `totalCents − paidCents` (RN-05.07).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "closedAt": {
             "anyOf": [
               {
@@ -6014,6 +7040,13 @@
             "maximum": 9007199254740991,
             "minimum": -9007199254740991,
             "type": "integer"
+          },
+          "discountReason": {
+            "description": "Motivo do desconto (RN-05.01).",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "discountType": {
             "anyOf": [
@@ -6070,6 +7103,12 @@
           "openedBy": {
             "$ref": "#/components/schemas/ActorRef"
           },
+          "paidCents": {
+            "description": "Soma dos pagamentos não estornados (RN-05.07).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
           "readyItemCount": {
             "description": "Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.",
             "maximum": 9007199254740991,
@@ -6123,6 +7162,9 @@
           "itemCount",
           "readyItemCount",
           "lateItemCount",
+          "discountReason",
+          "paidCents",
+          "balanceCents",
           "openedAt",
           "openedBy",
           "closedAt",
@@ -10608,6 +11650,304 @@
         ]
       }
     },
+    "/api/v1/cash-registers/{id}": {
+      "get": {
+        "operationId": "CashController_getRegister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashRegisterDetail"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade (RN-05.16)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Caixa com movimentos, pagamentos e esperado por forma",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
+    "/api/v1/cash-registers/{id}/close": {
+      "post": {
+        "operationId": "CashController_closeRegister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloseCashRegisterRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashRegister"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CLOSING_NOTE_REQUIRED` (`details.counts` com as diferenças) ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade (RN-05.16)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CASH_REGISTER_CLOSED` ou `VERSION_CONFLICT`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Fecha o caixa com o valor conferido de cada forma; diferença exige observação (RN-05.20, RN-05.21, CA-05.07)",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
+    "/api/v1/cash-registers/{id}/movements": {
+      "post": {
+        "operationId": "CashController_move",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CashMovementRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashRegisterDetail"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade (RN-05.16)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`WITHDRAWAL_EXCEEDS_CASH`, `CASH_REGISTER_CLOSED` ou `VERSION_CONFLICT`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Sangria (`withdrawal`, até o dinheiro esperado) ou suprimento (`deposit`), com motivo (RN-05.18)",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
     "/api/v1/categories": {
       "post": {
         "operationId": "MenuController_createCategory",
@@ -11789,6 +13129,112 @@
         ]
       }
     },
+    "/api/v1/payments/{id}/reverse": {
+      "post": {
+        "operationId": "CashController_reverse",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReversePaymentRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResult"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`PAYMENT_ALREADY_REVERSED`, `CASH_REGISTER_CLOSED`, `TAB_CLOSED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Estorna um pagamento, com motivo, com turno e caixa abertos; comanda paga volta a `closing` (RN-05.13 a RN-05.15)",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
     "/api/v1/products": {
       "post": {
         "operationId": "MenuController_createProduct",
@@ -12180,6 +13626,186 @@
         "summary": "Marca o produto como esgotado (dono e colaboradores com estação na unidade, RN-03.11)",
         "tags": [
           "menu"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/cash-registers": {
+      "get": {
+        "operationId": "CashController_listRegisters",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashRegisterList"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o balcão e quem opera o caixa na unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Caixas do turno com o esperado por forma de pagamento",
+        "tags": [
+          "cash"
+        ]
+      },
+      "post": {
+        "operationId": "CashController_openRegister",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OpenCashRegisterRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CashRegister"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono ou quem opera o caixa na unidade (RN-05.16)."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`CASH_REGISTER_NAME_TAKEN` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Abre um caixa no turno com fundo de troco; vários podem ficar abertos (RN-05.16, RN-05.17)",
+        "tags": [
+          "cash"
         ]
       }
     },
@@ -12583,6 +14209,122 @@
         "summary": "Abre uma comanda aberta com o próximo número do turno (RN-04.09)",
         "tags": [
           "operation"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/tabs/pay-first": {
+      "post": {
+        "operationId": "CashController_payFirst",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayFirstRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_CASH_REGISTER` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`PAYMENT_INSUFFICIENT` (nada é gravado, CA-05.09), `ORDER_REJECTED`, `NO_CASH_REGISTER_OPEN` (CA-05.08), `CASH_REGISTER_REQUIRED` (`details.cashRegisters`), `CASH_REGISTER_CLOSED`, `PAYMENT_EXCEEDS_BALANCE` (CA-05.03), `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Comanda paga antes: comanda, pedido e pagamentos numa operação; nasce `paid` e só então o pedido vai às estações (RN-05.12, CA-04.10)",
+        "tags": [
+          "cash"
         ]
       }
     },
@@ -13565,6 +15307,226 @@
         ]
       }
     },
+    "/api/v1/tabs/{id}/discount": {
+      "delete": {
+        "operationId": "CashController_removeDiscount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveDiscountRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_PAID`, `TAB_CLOSED`, `TAB_PAYMENTS_EXCEED_TOTAL`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Remove o desconto da comanda, com motivo (RN-05.01)",
+        "tags": [
+          "cash"
+        ]
+      },
+      "put": {
+        "operationId": "CashController_setDiscount",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PutDiscountRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tab"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VALIDATION_FAILED` (percentual de 1 a 100, motivo obrigatório)."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`TAB_PAYMENTS_EXCEED_TOTAL` (o total ficaria menor que o já pago), `TAB_PAID`, `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Aplica ou substitui o desconto da comanda em `open` ou `closing`: valor ou percentual, com motivo (RN-05.01 a RN-05.03)",
+        "tags": [
+          "cash"
+        ]
+      }
+    },
     "/api/v1/tabs/{id}/orders": {
       "post": {
         "operationId": "OperationController_createOrder",
@@ -13668,6 +15630,122 @@
         "summary": "Envia um pedido à comanda aberta: 1 a 50 itens, cada item vai à estação de preparo (RN-04.16 a RN-04.19)",
         "tags": [
           "operation"
+        ]
+      }
+    },
+    "/api/v1/tabs/{id}/payments": {
+      "post": {
+        "operationId": "CashController_pay",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "UUID gerado no aparelho. Repetir a mesma chave devolve a mesma resposta por 24 h, sem repetir a ação.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentResult"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_CASH_REGISTER` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: é preciso ter acesso ao balcão da unidade."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NO_CASH_REGISTER_OPEN` (CA-05.08), `CASH_REGISTER_REQUIRED` (`details.cashRegisters`), `CASH_REGISTER_CLOSED`, `PAYMENT_EXCEEDS_BALANCE` (CA-05.03), `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`, `TAB_NOT_CLOSING` (RN-05.07) ou `TAB_CLOSED`.\n\n`IDEMPOTENCY_KEY_REUSED` (mesma chave com outro corpo) ou `IDEMPOTENCY_REQUEST_IN_PROGRESS`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Registra um pagamento da comanda em `closing`: Pix e cartões até o saldo, dinheiro com troco; com saldo zero a comanda fica `paid` (RN-05.04 a RN-05.10)",
+        "tags": [
+          "cash"
         ]
       }
     },
@@ -14732,7 +16810,7 @@
                 }
               }
             },
-            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+            "description": "`FORBIDDEN`: colaborador sem acesso à unidade."
           },
           "404": {
             "content": {
@@ -14760,7 +16838,7 @@
             "panelSession": []
           }
         ],
-        "summary": "Fluxo de etapas da unidade",
+        "summary": "Fluxo de etapas da unidade: dono e colaboradores da unidade (leitura; só o dono altera)",
         "tags": [
           "units"
         ]

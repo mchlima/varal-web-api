@@ -14,12 +14,14 @@ import {
   ApiBadRequestResponse,
   ApiConflictResponse,
   ApiCreatedResponse,
+  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
 } from '@nestjs/swagger';
 import type { z } from 'zod';
 
+import { PanelAuth } from '../auth/auth.decorators.js';
 import { type Page, PaginationQuerySchema, type PaginationQuery } from '../common/pagination.js';
 import { ErrorResponseSchema } from '../errors/error-response.schema.js';
 import { Idempotent } from '../idempotency/idempotent.decorator.js';
@@ -46,9 +48,11 @@ import { WorkflowService } from './workflow.service.js';
 const SHIFT_OPEN_DOC =
   '`SHIFT_OPEN`: a unidade está com turno aberto (CA-03.03); `VERSION_CONFLICT`; nomes repetidos (`*_NAME_TAKEN`); `STATION_KIND_REQUIRED` ou `STATION_IN_USE`.';
 
-/** Units, stations and workflow (spec 03, sections 3 and 4). Owner only. */
+/**
+ * Units, stations and workflow (spec 03, sections 3 and 4). Owner only, except reading the workflow:
+ * the counter and the stations of the unit need its stages (phase 5 adjustment).
+ */
 @ApiTags('units')
-@OwnerOnly()
 @Controller()
 export class UnitsController {
   constructor(
@@ -57,6 +61,7 @@ export class UnitsController {
     private readonly workflow: WorkflowService,
   ) {}
 
+  @OwnerOnly()
   @Get('units')
   @ApiOperation({ summary: 'Unidades da organização (ativas e inativas)' })
   @ApiOkResponse({ standardSchema: UnitPageSchema })
@@ -66,6 +71,7 @@ export class UnitsController {
     return this.units.list(query);
   }
 
+  @OwnerOnly()
   @Post('units')
   @Idempotent()
   @ApiOperation({
@@ -79,6 +85,7 @@ export class UnitsController {
     return this.units.create(body);
   }
 
+  @OwnerOnly()
   @Patch('units/:id')
   @ApiOperation({ summary: 'Renomeia, ativa ou desativa a unidade e ajusta o tempo de atraso' })
   @ApiOkResponse({ standardSchema: UnitSchema })
@@ -95,6 +102,7 @@ export class UnitsController {
     return this.units.update(id, body);
   }
 
+  @OwnerOnly()
   @Get('units/:id/stations')
   @ApiOperation({ summary: 'Estações da unidade' })
   @ApiOkResponse({ standardSchema: StationListSchema })
@@ -103,6 +111,7 @@ export class UnitsController {
     return { data: await this.stations.list(id) };
   }
 
+  @OwnerOnly()
   @Post('units/:id/stations')
   @Idempotent()
   @ApiOperation({ summary: 'Cria uma estação na unidade' })
@@ -116,6 +125,7 @@ export class UnitsController {
     return this.stations.create(id, body);
   }
 
+  @OwnerOnly()
   @Patch('stations/:id')
   @ApiOperation({ summary: 'Altera uma estação (nome, tipo, ordem, ativa)' })
   @ApiOkResponse({ standardSchema: StationSchema })
@@ -128,14 +138,23 @@ export class UnitsController {
     return this.stations.update(id, body);
   }
 
+  @PanelAuth()
   @Get('units/:id/workflow')
-  @ApiOperation({ summary: 'Fluxo de etapas da unidade' })
+  @ApiOperation({
+    summary:
+      'Fluxo de etapas da unidade: dono e colaboradores da unidade (leitura; só o dono altera)',
+  })
   @ApiOkResponse({ standardSchema: WorkflowSchema })
   @NotFoundResponse()
+  @ApiForbiddenResponse({
+    description: '`FORBIDDEN`: colaborador sem acesso à unidade.',
+    standardSchema: ErrorResponseSchema,
+  })
   getWorkflow(@Param('id', IdPipe) id: string): Promise<WorkflowDto> {
     return this.workflow.get(id);
   }
 
+  @OwnerOnly()
   @Put('units/:id/workflow')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

@@ -4,6 +4,7 @@ import {
   AgreementModality,
   DiscountType,
   OrderStatus,
+  PaymentMethod,
   ShiftStatus,
   ShiftType,
   TabMode,
@@ -58,6 +59,12 @@ export const OrderStatusSchema = z.enum(OrderStatus).meta({
 export const DiscountTypeSchema = z.enum(DiscountType).meta({
   id: 'DiscountType',
   description: 'Desconto da comanda (spec 05): `amount` em centavos ou `percent` de 1 a 100.',
+});
+
+export const PaymentMethodSchema = z.enum(PaymentMethod).meta({
+  id: 'PaymentMethod',
+  description:
+    'Forma de pagamento, só registrada (RN-05.04): `pix`, `cash` (dinheiro, com troco), `credit_card`, `debit_card`.',
 });
 
 export const OrderItemRejectionReasonSchema = z.enum(ORDER_ITEM_REJECTION_REASONS).meta({
@@ -211,7 +218,7 @@ export const ShiftPendingItemsSchema = z
     tabs: z.array(ShiftPendingTabSchema).meta({ description: 'Comandas em `open` ou `closing`.' }),
     cashRegisters: z
       .array(z.object({ id: z.uuid(), name: z.string() }))
-      .meta({ description: 'Caixas ainda abertos (spec 05; vazio até os caixas existirem).' }),
+      .meta({ description: 'Caixas do turno ainda abertos (spec 05).' }),
   })
   .meta({
     id: 'ShiftPendingItems',
@@ -408,6 +415,13 @@ export const TabSummarySchema = z
         'Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.',
     }),
     lateItemCount: z.int().meta({ description: 'Unidades atrasadas (RN-04.23).' }),
+    discountReason: z.string().nullable().meta({ description: 'Motivo do desconto (RN-05.01).' }),
+    paidCents: z.int().meta({
+      description: 'Soma dos pagamentos não estornados (RN-05.07).',
+    }),
+    balanceCents: z.int().meta({
+      description: 'Saldo a receber: `totalCents − paidCents` (RN-05.07).',
+    }),
     openedAt: z.iso.datetime(),
     openedBy: ActorRefSchema,
     closedAt: z.iso.datetime().nullable(),
@@ -417,8 +431,45 @@ export const TabSummarySchema = z
 
 export type TabSummaryDto = z.infer<typeof TabSummarySchema>;
 
+// ------------------------------------------------------------------------------------------------
+// Payments (spec 05, section 4)
+// ------------------------------------------------------------------------------------------------
+
+export const PaymentSchema = z
+  .object({
+    id: z.uuid(),
+    tabId: z.uuid(),
+    tabNumber: z.int(),
+    customerName: z.string(),
+    shiftId: z.uuid().meta({ description: 'Turno em que o dinheiro entrou.' }),
+    cashRegisterId: z.uuid(),
+    method: PaymentMethodSchema,
+    amountCents: z.int().meta({ description: 'Valor aplicado à comanda (RN-05.09).' }),
+    tenderedCents: z.int().nullable().meta({
+      description: 'Só dinheiro: valor entregue pelo cliente.',
+    }),
+    changeCents: z.int().nullable().meta({
+      description: 'Só dinheiro: troco (`tenderedCents − amountCents`), exibido em destaque.',
+    }),
+    isCreditSettlement: z.boolean().meta({ description: 'Quitação de fiado (spec 06).' }),
+    receivedBy: ActorRefSchema,
+    createdAt: z.iso.datetime(),
+    reversedAt: z.iso.datetime().nullable().meta({
+      description:
+        'Estornado (RN-05.15): o pagamento continua registrado e sai do saldo e do caixa.',
+    }),
+    reversedBy: ActorRefSchema.nullable(),
+    reversalReason: z.string().nullable(),
+  })
+  .meta({ id: 'Payment', description: 'Pagamento registrado (spec 05, seção 4).' });
+
+export type PaymentDto = z.infer<typeof PaymentSchema>;
+
 export const TabSchema = TabSummarySchema.extend({
   orders: z.array(OrderSchema).meta({ description: 'Pedidos, do primeiro ao último.' }),
+  payments: z.array(PaymentSchema).meta({
+    description: 'Pagamentos da comanda, inclusive os estornados, do primeiro ao último.',
+  }),
 }).meta({ id: 'Tab', description: 'Comanda com pedidos, itens e totais.' });
 
 export type TabDto = z.infer<typeof TabSchema>;

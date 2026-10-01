@@ -11,6 +11,9 @@
  * - An open shift (spec 04) in the unit with three tabs and orders in different stages, for the
  *   counter, station and owner screens: created once, only when the unit has never had a shift
  *   (close it in the app and the seed will not open another).
+ * - In that shift (spec 05), "Caixa 1" opened by `ana` with R$ 100,00 of float, a partial Pix on
+ *   "Mesa da família" and a "paga antes" tab paid in cash with change: created once, while the
+ *   open shift has no cash register.
  * - Platform admin admin@varal.local, with the Super admin role (spec 02, RN-02.05). The system roles
  *   come from the migration; the seed only creates any that are missing (never changes them).
  * - DEVELOPMENT ONLY password `varal12345` for the owner, both staff members and the admin. It is set
@@ -214,6 +217,7 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
     }
 
     await seedShift(tx, { organizationId, unitId: unit.id, ownerId: owner.id });
+    await seedCash(tx, { organizationId, unitId: unit.id, cashierId: staffMemberIds[0] ?? null });
 
     const platformAdmin = await tx.platformAdmin.upsert({
       where: { email: SEED.platformAdmin.email },
@@ -536,6 +540,153 @@ async function seedShift(
   }
 }
 
+/** The "paga antes" tab of the seed (spec 05): two sodas, paid in cash with R$ 20,00. */
+export const SEED_PAY_FIRST = {
+  customerName: 'Lucas',
+  product: 'Refrigerante lata',
+  quantity: 2,
+  tenderedCents: 2000,
+} as const;
+
+/**
+ * A cash register with payments in the open example shift (spec 05), written once: nothing happens
+ * without an open shift or when it already has a register.
+ */
+async function seedCash(
+  tx: Prisma.TransactionClient,
+  scope: { organizationId: string; unitId: string; cashierId: string | null },
+): Promise<void> {
+  const { organizationId, unitId, cashierId } = scope;
+  const shift = await tx.shift.findFirst({ where: { organizationId, unitId, status: 'open' } });
+  if (
+    !shift ||
+    (await tx.cashRegister.count({ where: { organizationId, shiftId: shift.id } })) > 0
+  ) {
+    return;
+  }
+  const actor =
+    cashierId === null
+      ? { type: 'system' as const, id: null }
+      : { type: 'staff' as const, id: cashierId };
+  const register = await tx.cashRegister.create({
+    data: {
+      organizationId,
+      shiftId: shift.id,
+      unitId,
+      name: 'Caixa 1',
+      status: 'open',
+      openingFloatCents: 10_000,
+      openedByType: actor.type,
+      openedById: actor.id,
+      openedAt: shift.openedAt,
+    },
+  });
+  const payment = (
+    tabId: string,
+    method: 'pix' | 'cash',
+    amountCents: number,
+    tenderedCents?: number,
+  ) =>
+    tx.payment.create({
+      data: {
+        organizationId,
+        tabId,
+        shiftId: shift.id,
+        cashRegisterId: register.id,
+        method,
+        amountCents,
+        tenderedCents: tenderedCents ?? null,
+        changeCents: tenderedCents === undefined ? null : tenderedCents - amountCents,
+        receivedByType: actor.type,
+        receivedById: actor.id,
+      },
+    });
+
+  // A partial Pix on the tab in `closing`: half of its total, the rest still to receive.
+  const closing = await tx.tab.findFirst({
+    where: { organizationId, shiftId: shift.id, status: 'closing' },
+    include: { items: { include: { modifiers: true } } },
+  });
+  if (closing) {
+    const total = closing.items
+      .filter((item) => item.canceledAt === null)
+      .reduce(
+        (sum, item) =>
+          sum +
+          (item.unitPriceCents +
+            item.modifiers.reduce((acc, mod) => acc + mod.priceDeltaCents, 0)) *
+            item.quantity,
+        0,
+      );
+    if (total > 1) {
+      await payment(closing.id, 'pix', Math.floor(total / 2));
+    }
+  }
+
+  // A "paga antes" tab, born paid, with its drinks already delivered.
+  const product = await tx.product.findFirst({
+    where: { organizationId, unitId, name: SEED_PAY_FIRST.product },
+    include: { category: true },
+  });
+  const final = await tx.workflowStage.findFirst({
+    where: { organizationId, unitId, archivedAt: null, isFinal: true },
+  });
+  if (!product || !final) {
+    return;
+  }
+  const numbered = await tx.shift.update({
+    where: { id: shift.id },
+    data: { nextTabNumber: { increment: 1 } },
+  });
+  const now = new Date();
+  const tab = await tx.tab.create({
+    data: {
+      organizationId,
+      shiftId: shift.id,
+      unitId,
+      number: numbered.nextTabNumber - 1,
+      customerName: SEED_PAY_FIRST.customerName,
+      mode: 'pay_first',
+      status: 'paid',
+      openedByType: actor.type,
+      openedById: actor.id,
+      closedAt: now,
+    },
+  });
+  const order = await tx.order.create({
+    data: {
+      organizationId,
+      tabId: tab.id,
+      shiftId: shift.id,
+      numberInTab: 1,
+      status: 'completed',
+      createdByType: actor.type,
+      createdById: actor.id,
+      sentAt: now,
+      completedAt: now,
+    },
+  });
+  await tx.orderItem.create({
+    data: {
+      organizationId,
+      orderId: order.id,
+      tabId: tab.id,
+      unitId,
+      productId: product.id,
+      productName: product.name,
+      unitPriceCents: product.priceCents,
+      quantity: SEED_PAY_FIRST.quantity,
+      position: 0,
+      prepStationId: product.stationId ?? product.category.defaultStationId,
+      stageId: final.id,
+      stationId: null,
+      stageEnteredAt: now,
+    },
+  });
+  const total = product.priceCents * SEED_PAY_FIRST.quantity;
+  await payment(tab.id, 'cash', total, Math.max(total, SEED_PAY_FIRST.tenderedCents));
+}
+
 if (import.meta.main) {
   const { loadEnvFiles } = await import('../src/config/load-env.js');
   const { PrismaClient } = await import('../src/generated/prisma/client.js');
@@ -550,7 +701,7 @@ if (import.meta.main) {
     const result = await seed(prisma);
     console.log(
       `Seed ok: organização ${SEED.organization.name} (código ${SEED.organization.accessCode}), ` +
-        `unidade com estações, fluxo, cardápio e um turno aberto de exemplo, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
+        `unidade com estações, fluxo, cardápio e um turno aberto de exemplo com um caixa, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
         `Senha de desenvolvimento: ${SEED.devPassword}.`,
     );
   } finally {

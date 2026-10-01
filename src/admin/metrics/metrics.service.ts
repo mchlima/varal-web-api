@@ -21,12 +21,24 @@ export interface MetricsPeriod {
 
 /** Operational totals of one organization in a period (shifts and tabs, specs 04 to 06). */
 interface OperationalTotals {
+  /** Shifts closed in the period. */
   shifts: number;
+  /** Shifts opened in the period ("organizações ativas"). */
+  openedShifts: number;
   tabs: number;
   soldCents: number;
 }
 
-const NO_TOTALS: OperationalTotals = { shifts: 0, tabs: 0, soldCents: 0 };
+const NO_TOTALS: OperationalTotals = { shifts: 0, openedShifts: 0, tabs: 0, soldCents: 0 };
+
+function totalsOf(map: Map<string, OperationalTotals>, organizationId: string): OperationalTotals {
+  let totals = map.get(organizationId);
+  if (!totals) {
+    totals = { ...NO_TOTALS };
+    map.set(organizationId, totals);
+  }
+  return totals;
+}
 
 /** `?from=&to=` in São Paulo days (default: the last 30 days, today included). */
 export function resolvePeriod(
@@ -73,19 +85,19 @@ export function weekStarts(period: MetricsPeriod): Temporal.PlainDate[] {
 /**
  * Usage metrics (spec 02, section 6), computed from existing data only (no table of their own).
  *
- * Shifts, tabs and sales come from specs 04 to 06, which do not exist yet: {@link operationalTotals}
- * is the single place to fill then (shifts closed in the period, tabs paid, on credit or settled in
- * the period and the sum of their totals, per organization, filtering `closed_at`/`paid_at` in
- * `[start, end)`). Until then those numbers are zero.
+ * Shifts, tabs and sales come from specs 04 to 06 ({@link operationalTotals}): shifts closed in the
+ * period, organizations with a shift opened in it, tabs paid, on credit or settled in it (by
+ * `closed_at`) and the sum of their totals.
  */
 @Injectable()
 export class MetricsService {
   constructor(private readonly platform: PlatformPrismaService) {}
 
   async overview(period: MetricsPeriod): Promise<MetricsOverview> {
-    const [byStatus, totals] = await Promise.all([
+    const [byStatus, totals, closedByWeek] = await Promise.all([
       this.platform.organization.groupBy({ by: ['subscriptionStatus'], _count: { _all: true } }),
       this.operationalTotals(period),
+      this.shiftsByWeek(period),
     ]);
     const organizationsByStatus = Object.fromEntries(
       Object.values(SubscriptionStatus).map((status) => [
@@ -100,13 +112,13 @@ export class MetricsService {
       period: this.periodOut(period),
       organizationsByStatus,
       // Organizations with at least one shift opened in the period (spec 04).
-      activeOrganizations: all.filter((item) => item.shifts > 0).length,
+      activeOrganizations: all.filter((item) => item.openedShifts > 0).length,
       shifts: {
         total: all.reduce((sum, item) => sum + item.shifts, 0),
-        // Shifts closed per week (spec 04); zero until shifts exist.
+        // Shifts closed per week (Monday in São Paulo).
         byWeek: weekStarts(period).map((weekStart) => ({
           weekStart: weekStart.toString(),
-          count: 0,
+          count: closedByWeek.get(weekStart.toString()) ?? 0,
         })),
       },
       tabs,
@@ -163,9 +175,70 @@ export class MetricsService {
     };
   }
 
-  /** Spec 04 to 06 fill this: per organization, in `[period.start, period.end)`. */
-  private operationalTotals(_period: MetricsPeriod): Promise<Map<string, OperationalTotals>> {
-    return Promise.resolve(new Map<string, OperationalTotals>());
+  /**
+   * Per organization, in `[period.start, period.end)`. Raw SQL over every organization (platform
+   * client, spec 02). The total of a tab is computed as in RN-04.14 and RN-05.03: lines not
+   * canceled with their modifiers, minus the discount (an amount up to the subtotal, or a
+   * percentage rounded down), never from the current menu prices.
+   */
+  private async operationalTotals(period: MetricsPeriod): Promise<Map<string, OperationalTotals>> {
+    const { start, end } = period;
+    const [closed, opened, sold] = await Promise.all([
+      this.platform.$queryRaw<{ organization_id: string; count: number }[]>`
+        SELECT organization_id, COUNT(*)::int AS count FROM shifts
+        WHERE status = 'closed' AND closed_at >= ${start} AND closed_at < ${end}
+        GROUP BY organization_id`,
+      this.platform.$queryRaw<{ organization_id: string; count: number }[]>`
+        SELECT organization_id, COUNT(*)::int AS count FROM shifts
+        WHERE opened_at >= ${start} AND opened_at < ${end}
+        GROUP BY organization_id`,
+      this.platform.$queryRaw<{ organization_id: string; tabs: number; sold_cents: bigint }[]>`
+        WITH totals AS (
+          SELECT t.organization_id, t.discount_type, t.discount_value,
+                 COALESCE(SUM((oi.unit_price_cents + COALESCE(m.delta, 0)) * oi.quantity)
+                   FILTER (WHERE oi.canceled_at IS NULL), 0)::bigint AS subtotal
+          FROM tabs t
+          LEFT JOIN order_items oi ON oi.tab_id = t.id
+          LEFT JOIN (
+            SELECT order_item_id, SUM(price_delta_cents) AS delta
+            FROM order_item_modifiers GROUP BY order_item_id
+          ) m ON m.order_item_id = oi.id
+          WHERE t.status IN ('paid', 'on_credit', 'settled')
+            AND t.closed_at >= ${start} AND t.closed_at < ${end}
+          GROUP BY t.id
+        )
+        SELECT organization_id, COUNT(*)::int AS tabs,
+               COALESCE(SUM(subtotal - LEAST(subtotal, CASE discount_type
+                 WHEN 'amount' THEN discount_value::bigint
+                 WHEN 'percent' THEN subtotal * discount_value / 100
+                 ELSE 0 END)), 0)::bigint AS sold_cents
+        FROM totals GROUP BY organization_id`,
+    ]);
+    const map = new Map<string, OperationalTotals>();
+    for (const row of closed) {
+      totalsOf(map, row.organization_id).shifts = row.count;
+    }
+    for (const row of opened) {
+      totalsOf(map, row.organization_id).openedShifts = row.count;
+    }
+    for (const row of sold) {
+      const totals = totalsOf(map, row.organization_id);
+      totals.tabs = row.tabs;
+      totals.soldCents = Number(row.sold_cents);
+    }
+    return map;
+  }
+
+  /** Shifts closed per week of the period, by the Monday (São Paulo) of the closing day. */
+  private async shiftsByWeek(period: MetricsPeriod): Promise<Map<string, number>> {
+    const rows = await this.platform.$queryRaw<{ week_start: string; count: number }[]>`
+      SELECT to_char(date_trunc('week', closed_at AT TIME ZONE ${TIME_ZONE}), 'YYYY-MM-DD')
+               AS week_start,
+             COUNT(*)::int AS count
+      FROM shifts
+      WHERE status = 'closed' AND closed_at >= ${period.start} AND closed_at < ${period.end}
+      GROUP BY 1`;
+    return new Map(rows.map((row) => [row.week_start, row.count]));
   }
 }
 

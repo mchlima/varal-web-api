@@ -26,9 +26,10 @@ import {
   type UnitFlow,
 } from './operation-reader.js';
 import type { ItemChangeDto, OrderItemDto, StationQueueDto } from './operation.schemas.js';
-import { isWaste } from './order-rules.js';
+import { isLate, isWaste, lateAtOf } from './order-rules.js';
+import { settleIfCovered } from './payments.service.js';
 import { lockRow } from './row-lock.js';
-import { assertShiftOpen } from './tabs.service.js';
+import { activePaymentIds, assertShiftOpen } from './tabs.service.js';
 
 /** The item, locked, with the context of its unit. */
 interface LockedItem {
@@ -105,6 +106,19 @@ export class OrderItemsService {
         { stageId: row.stageId, stationId: row.stationId },
         result.remaining,
       );
+      const wasLate = isLate(
+        lateAtOf(
+          { canceledAt: null, inFinalStage: false, sentAt: row.order.sentAt },
+          flow.lateAfterMinutes,
+        ),
+        now,
+      );
+      await this.tabCountersChanged(
+        db,
+        row.tabId,
+        isReadyStage(flow, row.stageId) || isReadyStage(flow, next.id) || (next.isFinal && wasLate),
+        now,
+      );
       await this.completeOrderIfDone(db, row.orderId, row.unitId, now);
       return result;
     });
@@ -159,6 +173,12 @@ export class OrderItemsService {
         { stageId: row.stageId, stationId: row.stationId },
         null,
       );
+      await this.tabCountersChanged(
+        db,
+        row.tabId,
+        isReadyStage(flow, row.stageId) || isReadyStage(flow, previous.id),
+        now,
+      );
       return result;
     });
   }
@@ -184,8 +204,12 @@ export class OrderItemsService {
       await lockRow(db, 'tabs', row.tabId);
       const tab = await db.tab.findUniqueOrThrow({ where: { id: row.tabId } });
       await assertShiftOpen(db, tab.shiftId);
+      if (tab.status === 'paid') {
+        // RN-04.28, RN-05.14: reverse the payment first (the tab goes back to `closing`), then
+        // cancel the item and receive again, or cancel the tab.
+        throw operationError('TAB_PAID', { paymentIds: await activePaymentIds(db, tab.id) });
+      }
       if (tab.status !== 'open' && tab.status !== 'closing') {
-        // RN-04.28 (a paid "paga antes" tab is a refund, spec 05).
         throw operationError('TAB_CLOSED');
       }
       const quantity = this.quantityOf(row, input.quantity);
@@ -217,6 +241,14 @@ export class OrderItemsService {
         remainingId = row.id;
       }
       await db.tab.update({ where: { id: tab.id }, data: { version: { increment: 1 } } });
+      const totals = await loadTabSummary(db, tab.id, now);
+      if (totals.balanceCents < 0) {
+        // RN-05.07: what was already paid never goes past the total; reverse a payment first.
+        throw operationError('TAB_PAYMENTS_EXCEED_TOTAL', {
+          paidCents: totals.paidCents,
+          totalCents: totals.totalCents,
+        });
+      }
       const result = await this.result(db, flow, now, changedId, remainingId);
       await this.audit.record(db, {
         action: 'order_item.canceled',
@@ -233,6 +265,8 @@ export class OrderItemsService {
         },
       });
       this.events.canceled(result.changed, row.stationId, result.remaining);
+      // RN-05.10: the cancel may leave the tab fully paid.
+      await settleIfCovered(db, this.audit, tab.id);
       this.events.tab(TabUpdated, await loadTabSummary(db, tab.id, now));
       await this.completeOrderIfDone(db, row.orderId, row.unitId, now);
       return result;
@@ -274,6 +308,26 @@ export class OrderItemsService {
       })),
       items: rows.map((row) => toOrderItemDto(row, flow.lateAfterMinutes, now)),
     };
+  }
+
+  /**
+   * Ajuste da fase 5: the varal counts items ready to deliver and late per tab (`readyItemCount`,
+   * `lateItemCount`). A stage change that moves them bumps the tab version and emits `tab.updated`
+   * with totals and counters; other stage changes emit nothing more. Same lock order as the
+   * cancel: item, then tab.
+   */
+  private async tabCountersChanged(
+    db: TenantDb,
+    tabId: string,
+    changed: boolean,
+    now: Date,
+  ): Promise<void> {
+    if (!changed) {
+      return;
+    }
+    await lockRow(db, 'tabs', tabId);
+    await db.tab.update({ where: { id: tabId }, data: { version: { increment: 1 } } });
+    this.events.tab(TabUpdated, await loadTabSummary(db, tabId, now));
   }
 
   /**
@@ -425,6 +479,11 @@ export class OrderItemsService {
       this.events.orderCompleted(order, unitId);
     }
   }
+}
+
+/** The stage counted as "pronto para entregar" (`readyItemCount`). */
+function isReadyStage(flow: UnitFlow, stageId: string): boolean {
+  return flow.beforeFinal !== null && flow.beforeFinal.id === stageId;
 }
 
 function forbiddenItem(): AppError {
