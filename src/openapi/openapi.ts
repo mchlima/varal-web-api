@@ -8,7 +8,7 @@ import type { z } from 'zod';
 import { AUTH_COOKIES } from '../auth/auth-area.js';
 import { ADMIN_SECURITY_SCHEME, PANEL_SECURITY_SCHEME } from '../auth/auth.decorators.js';
 import { ErrorResponseSchema } from '../errors/error-response.schema.js';
-import { contractSchemas } from './contract-schemas.js';
+import { contractSchemas, queryContractSchemas } from './contract-schemas.js';
 import { toComponentSchemas, zodOpenApiConverter } from './zod-openapi.converter.js';
 
 export const OPENAPI_VERSION = '3.1.0';
@@ -47,11 +47,12 @@ function withSingleExample(value: unknown): unknown {
 export function mergeContractSchemas(
   document: OpenAPIObject,
   schemas: readonly z.ZodType[],
+  io: 'input' | 'output' = 'output',
 ): OpenAPIObject {
   const components = (document.components ??= {});
   const target = (components.schemas ??= {}) as Record<string, unknown>;
   for (const schema of schemas) {
-    for (const [id, definition] of Object.entries(toComponentSchemas(schema))) {
+    for (const [id, definition] of Object.entries(toComponentSchemas(schema, io))) {
       if (id in target) {
         if (!isDeepStrictEqual(withSingleExample(target[id]), withSingleExample(definition))) {
           throw new Error(`OpenAPI schema "${id}" is defined twice with different shapes`);
@@ -140,7 +141,9 @@ export function buildOpenApiDocument(
   });
   // ErrorResponse always ships: every operation references it (addDefaultErrorResponses).
   const schemas = [ErrorResponseSchema, ...extraSchemas];
-  return sortKeysDeep(addDefaultErrorResponses(mergeContractSchemas(document, schemas)));
+  mergeContractSchemas(document, schemas);
+  mergeContractSchemas(document, queryContractSchemas, 'input');
+  return sortKeysDeep(addDefaultErrorResponses(document));
 }
 
 export function serializeOpenApiDocument(document: OpenAPIObject): string {

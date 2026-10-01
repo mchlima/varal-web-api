@@ -51,6 +51,16 @@ export const zodOpenApiConverter: StandardSchemaConverter = (schema, { schemaTyp
   if (!isZodSchema(schema)) {
     return undefined;
   }
+  const converted = convert(schema, schemaType);
+  const result: StandardSchemaConversionResult = {
+    schema: converted.schema,
+    components: converted.defs,
+  };
+  return result;
+};
+
+/** Converts a zod schema, publishing a differing input variant of a named schema as `<id>Input`. */
+function convert(schema: z.ZodType, schemaType: 'input' | 'output'): Converted {
   const converted = toJsonSchema(schema, schemaType);
   if (schemaType === 'input') {
     const output = toJsonSchema(schema, 'output');
@@ -69,20 +79,22 @@ export const zodOpenApiConverter: StandardSchemaConverter = (schema, { schemaTyp
       ]),
     );
   }
-  const result: StandardSchemaConversionResult = {
-    schema: converted.schema,
-    components: converted.defs,
-  };
-  return result;
-};
+  return converted;
+}
 
-/** Converts a named schema to the `components.schemas` entries it needs (itself plus nested named schemas). */
-export function toComponentSchemas(schema: z.ZodType): Record<string, JsonObject> {
+/**
+ * Converts a named schema to the `components.schemas` entries it needs (itself plus nested named
+ * schemas). With `input`, a differing input shape is named `<id>Input`, as routes publish it.
+ */
+export function toComponentSchemas(
+  schema: z.ZodType,
+  io: 'input' | 'output' = 'output',
+): Record<string, JsonObject> {
   const id = z.globalRegistry.get(schema)?.id;
   if (typeof id !== 'string' || id.length === 0) {
     throw new Error('Contract schemas must be named with .meta({ id })');
   }
-  const { defs } = toJsonSchema(schema, 'output');
+  const { defs } = convert(schema, io);
   // Same rewrite @nestjs/swagger applies to route schemas.
   return JSON.parse(
     JSON.stringify(defs).split('"#/$defs/').join('"#/components/schemas/'),

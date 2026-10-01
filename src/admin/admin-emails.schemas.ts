@@ -10,6 +10,14 @@ export const EmailUsageLevelSchema = z.enum(['ok', 'warning', 'critical']).meta(
     'RN-01.04: `warning` a partir de 8.000 envios no mês (alerta no admin); `critical` a partir de 10.000 (só convites e redefinições continuam).',
 });
 
+export const EmailUsageQuerySchema = z.object({
+  month: z
+    .string()
+    .regex(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'Use o formato AAAA-MM.' })
+    .optional()
+    .meta({ description: 'Mês em `America/Sao_Paulo` (AAAA-MM). Padrão: o mês atual.' }),
+});
+
 export const EmailUsageSchema = z
   .object({
     month: z
@@ -48,4 +56,4 @@ export const EmailLogListQuerySchema = PaginationQuerySchema.extend({
   organizationId: z.uuid().optional(),
   from: InstantFilterSchema.meta({ description: 'Criados a partir deste instante (inclusive).' }),
   to: InstantFilterSchema.meta({ description: 'Criados antes deste instante.' }),
-}).meta({ id: 'EmailLogListQuery' });
+});

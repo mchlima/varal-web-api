@@ -4,16 +4,14 @@ import { SubscriptionStatusSchema } from '../../openapi/enum-schemas.js';
 
 const PlainDateSchema = z.iso.date({ error: 'Use o formato AAAA-MM-DD.' });
 
-export const MetricsPeriodQuerySchema = z
-  .object({
-    from: PlainDateSchema.optional().meta({
-      description: 'Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.',
-    }),
-    to: PlainDateSchema.optional().meta({
-      description: 'Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.',
-    }),
-  })
-  .meta({ id: 'MetricsPeriodQuery' });
+export const MetricsPeriodQuerySchema = z.object({
+  from: PlainDateSchema.optional().meta({
+    description: 'Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.',
+  }),
+  to: PlainDateSchema.optional().meta({
+    description: 'Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.',
+  }),
+});
 
 export const MetricsPeriodSchema = z
   .object({
@@ -69,7 +67,7 @@ export const OrganizationUsageSortSchema = z.enum([
 export const OrganizationUsageQuerySchema = MetricsPeriodQuerySchema.extend({
   sort: OrganizationUsageSortSchema.default('name'),
   order: z.enum(['asc', 'desc']).default('asc'),
-}).meta({ id: 'OrganizationUsageQuery' });
+});
 
 export const OrganizationUsageSchema = z
   .object({

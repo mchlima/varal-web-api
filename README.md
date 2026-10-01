@@ -102,6 +102,8 @@ Todo erro sai como `{ "error": { "code", "message", "details" } }` (schema `Erro
 
 `@Query({ schema: PaginationQuerySchema })` (`?limit=50&cursor=...`, limite 1 a 100), `pageArgs(query)` no `findMany` e `toPage(rows, limit)` → `{ data, nextCursor }`. O cursor é opaco (id UUID v7, em ordem de criação). Resposta nomeada com `pageSchema('UnitPage', UnitSchema)`.
 
+Filtros de lista estendem o schema (`PaginationQuerySchema.extend({ status: ... })`). **Schemas de query não levam `.meta({ id })`:** com nome, o `@nestjs/swagger` publica só uma referência e os parâmetros (`limit`, `cursor`, filtros) somem do `openapi.json`. Sem nome, cada campo vira um parâmetro `in: query`. O teste `test/e2e/openapi-query-params.e2e-spec.ts` falha se uma rota aceitar query que o documento não publica. Os componentes `…QueryInput` antigos (ex.: `OrganizationListQueryInput`) continuam publicados por compatibilidade (`queryContractSchemas` em `src/openapi/contract-schemas.ts`); listas novas não precisam entrar ali.
+
 ### Idempotência
 
 `@Idempotent()` numa rota de escrita aceita `Idempotency-Key` (UUID). A primeira requisição reserva a chave por sujeito; o handler roda numa transação ambiente (`prisma.transaction` entra nela) e a resposta é gravada nessa mesma transação. Repetição em 24 h devolve o mesmo status e corpo com `Idempotent-Replayed: true`. Mesma chave com outro corpo → 409 `IDEMPOTENCY_KEY_REUSED`; enquanto a primeira roda → 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Respostas 4xx são guardadas; 5xx liberam a chave. `IdempotencyService.purgeExpired()` apaga as vencidas, chamada pelo job diário de limpeza (seção Jobs).

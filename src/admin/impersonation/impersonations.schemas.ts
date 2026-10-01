@@ -56,6 +56,6 @@ export const ImpersonationListQuerySchema = PaginationQuerySchema.extend({
   organizationId: z.uuid().optional(),
   active: QueryFlagSchema,
   mine: QueryFlagSchema.meta({ description: 'Só os acessos do admin logado.' }),
-}).meta({ id: 'ImpersonationListQuery' });
+});
 
 export type ImpersonationResponse = z.infer<typeof ImpersonationSchema>;

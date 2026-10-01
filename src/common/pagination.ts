@@ -25,26 +25,32 @@ export function decodeCursor(cursor: string): string | null {
 
 /**
  * Query of every paginated list (spec 01, section 5): `?limit=50&cursor=...`.
- * Use with `@Query({ schema: PaginationQuerySchema })`.
+ * Use with `@Query({ schema: PaginationQuerySchema })`, or `.extend()` it with the list filters.
+ *
+ * Query schemas stay unnamed (no `.meta({ id })`): `@nestjs/swagger` only expands an inline object
+ * into one `in: query` parameter per field; a named schema becomes a `$ref` and the parameters
+ * vanish from the OpenAPI document. The named `PaginationQuery` component is
+ * {@link PaginationQueryContractSchema}.
  */
-export const PaginationQuerySchema = z
-  .object({
-    limit: z.coerce
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_PAGE_LIMIT)
-      .default(DEFAULT_PAGE_LIMIT)
-      .meta({
-        description: `Itens por página (1 a ${MAX_PAGE_LIMIT}, padrão ${DEFAULT_PAGE_LIMIT}).`,
-      }),
-    cursor: z
-      .string()
-      .refine((value) => decodeCursor(value) !== null, { message: 'Cursor inválido.' })
-      .optional()
-      .meta({ description: 'Valor de `nextCursor` da página anterior. Opaco: não monte à mão.' }),
-  })
-  .meta({ id: 'PaginationQuery' });
+export const PaginationQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_PAGE_LIMIT)
+    .default(DEFAULT_PAGE_LIMIT)
+    .meta({
+      description: `Itens por página (1 a ${MAX_PAGE_LIMIT}, padrão ${DEFAULT_PAGE_LIMIT}).`,
+    }),
+  cursor: z
+    .string()
+    .refine((value) => decodeCursor(value) !== null, { message: 'Cursor inválido.' })
+    .optional()
+    .meta({ description: 'Valor de `nextCursor` da página anterior. Opaco: não monte à mão.' }),
+});
+
+/** `PaginationQuery` in `components.schemas` (spec 01, section 5), for reference only. */
+export const PaginationQueryContractSchema = PaginationQuerySchema.meta({ id: 'PaginationQuery' });
 
 export type PaginationQuery = z.infer<typeof PaginationQuerySchema>;
 

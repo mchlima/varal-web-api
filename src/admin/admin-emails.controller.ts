@@ -1,6 +1,6 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { AdminArea, AdminAuth } from '../auth/auth.decorators.js';
 import { pageArgs, toPage } from '../common/pagination.js';
@@ -10,20 +10,11 @@ import { PlatformPrismaService } from '../prisma/platform-prisma.service.js';
 import {
   EmailLogListQuerySchema,
   EmailLogPageSchema,
+  EmailUsageQuerySchema,
   EmailUsageSchema,
   type EmailUsageResponse,
 } from './admin-emails.schemas.js';
 import { RequirePermission } from './rbac/require-permission.js';
-
-const EmailUsageQuerySchema = z
-  .object({
-    month: z
-      .string()
-      .regex(/^\d{4}-(0[1-9]|1[0-2])$/, { message: 'Use o formato AAAA-MM.' })
-      .optional()
-      .meta({ description: 'Mês em `America/Sao_Paulo` (AAAA-MM). Padrão: o mês atual.' }),
-  })
-  .meta({ id: 'EmailUsageQuery' });
 
 /** E-mail usage (RN-01.04; CA-01.09) and history (spec 02, section 8), with `emails:read`. */
 @ApiTags('admin-emails')
