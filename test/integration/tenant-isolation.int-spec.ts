@@ -1,4 +1,6 @@
-import { afterAll, beforeAll, describe, expect, inject, it } from 'vitest';
+import type { NestExpressApplication } from '@nestjs/platform-express';
+import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 
 import type { Env } from '../../src/config/env.js';
 import { requireOrganizationId } from '../../src/context/request-context.js';
@@ -9,8 +11,12 @@ import {
   asTenant,
   createTenant,
   describeTenantIsolation,
+  expectNotFoundForOtherTenant,
   type IsolationContext,
 } from '../support/isolation-kit.js';
+import { authHeaders } from '../support/stub-auth.js';
+import { createTestApp } from '../support/test-app.js';
+import { InfrastructureTestModule } from '../support/test-routes.js';
 
 const databaseUrl = inject('databaseUrl');
 
@@ -169,3 +175,46 @@ describe.skipIf(!databaseUrl)(
     });
   },
 );
+
+describe.skipIf(!databaseUrl)('tenant isolation over HTTP (base of CA-01.02)', () => {
+  let app: NestExpressApplication;
+  let platform: PlatformPrismaService;
+  let ctx: Omit<IsolationContext, 'prisma'>;
+
+  beforeAll(async () => {
+    app = await createTestApp({
+      imports: [InfrastructureTestModule],
+      databaseUrl: databaseUrl ?? '',
+    });
+    platform = app.get(PlatformPrismaService);
+    ctx = {
+      tenantA: await createTenant(platform, 'Org A'),
+      tenantB: await createTenant(platform, 'Org B'),
+    };
+  });
+
+  afterAll(async () => {
+    await app.close();
+    vi.unstubAllEnvs();
+  });
+
+  it('organization A reads its own unit', async () => {
+    await request(app.getHttpServer())
+      .get(`/api/v1/test/units/${ctx.tenantA.unitId}`)
+      .set(authHeaders(ctx.tenantA.auth))
+      .expect(200);
+  });
+
+  it('a staff member of B gets 404 for a unit of A, like a missing id', async () => {
+    await expectNotFoundForOtherTenant(app, {
+      method: 'get',
+      path: `/api/v1/test/units/${ctx.tenantA.unitId}`,
+      as: ctx.tenantB.auth,
+    });
+    await expectNotFoundForOtherTenant(app, {
+      method: 'get',
+      path: `/api/v1/test/units/${crypto.randomUUID()}`,
+      as: ctx.tenantB.auth,
+    });
+  });
+});
