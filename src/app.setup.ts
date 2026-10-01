@@ -6,6 +6,7 @@ import { APP_ENV } from './config/config.module.js';
 import type { Env } from './config/env.js';
 import { REQUEST_ID_HEADER } from './context/request-context.middleware.js';
 import { configureZodLocale, validationError } from './errors/validation.js';
+import { IDEMPOTENT_REPLAYED_HEADER } from './idempotency/idempotency.constants.js';
 
 export const API_PREFIX = 'api/v1';
 
@@ -31,7 +32,7 @@ export function configureApp(app: NestExpressApplication): NestExpressApplicatio
   app.enableCors({
     origin: env.CORS_ORIGINS,
     credentials: true,
-    exposedHeaders: [REQUEST_ID_HEADER],
+    exposedHeaders: [REQUEST_ID_HEADER, IDEMPOTENT_REPLAYED_HEADER],
   });
   // Validates params declared with `schema` (zod 4 via Standard Schema); failures become
   // VALIDATION_FAILED with one entry per field (spec 01, section 5).
