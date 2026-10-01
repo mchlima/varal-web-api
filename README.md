@@ -406,13 +406,13 @@ Módulos [`src/units`](src/units) (unidades, estações, fluxo, template, roteam
 
 ### Eventos (sala `unit:{unitId}`, depois do commit)
 
-| Evento                           | Schema                       | Quando                               | `data` / `version`                          |
-| -------------------------------- | ---------------------------- | ------------------------------------ | ------------------------------------------- |
-| `product.sold_out_changed`       | `EventProductSoldOutChanged` | Esgotado marcado ou desmarcado       | `{ productId, soldOut }`; versão do produto |
-| `menu.updated`                   | `EventMenuUpdated`           | Qualquer outra mudança no cardápio   | `{ unitId, version }`; versão do cardápio   |
-| `unit.config_updated` (proposta) | `EventUnitConfigUpdated`     | Unidade, estações ou fluxo alterados | `{ unitId, version }`; versão da unidade    |
+| Evento                     | Schema                       | Quando                               | `data` / `version`                          |
+| -------------------------- | ---------------------------- | ------------------------------------ | ------------------------------------------- |
+| `product.sold_out_changed` | `EventProductSoldOutChanged` | Esgotado marcado ou desmarcado       | `{ productId, soldOut }`; versão do produto |
+| `menu.updated`             | `EventMenuUpdated`           | Qualquer outra mudança no cardápio   | `{ unitId, version }`; versão do cardápio   |
+| `unit.config_updated`      | `EventUnitConfigUpdated`     | Unidade, estações ou fluxo alterados | `{ unitId, version }`; versão da unidade    |
 
-`unit.config_updated` não está na spec 03: proposto para o app recarregar `/auth/me` (tempo de atraso, estações) e a tela de configuração.
+`unit.config_updated` (spec 03, seção 8) avisa o app para recarregar `/auth/me` (tempo de atraso, estações) e a tela de configuração.
 
 ## Imagem
 
