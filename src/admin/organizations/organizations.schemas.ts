@@ -78,7 +78,7 @@ export const OrganizationShiftSummarySchema = z
   })
   .meta({
     id: 'OrganizationShiftSummary',
-    description: 'Turno no detalhe da organização (os turnos chegam com a spec 04).',
+    description: 'Turno no detalhe da organização (spec 04).',
   });
 
 export const OrganizationDetailSchema = OrganizationSummarySchema.extend({
@@ -86,7 +86,7 @@ export const OrganizationDetailSchema = OrganizationSummarySchema.extend({
   activeStaffCount: z.number().int(),
   recentShifts: z
     .array(OrganizationShiftSummarySchema)
-    .meta({ description: 'Últimos 10 turnos. Vazio até a spec 04 criar os turnos.' }),
+    .meta({ description: 'Últimos 10 turnos, do mais novo para o mais antigo.' }),
   lastAccessAt: z.iso.datetime().nullable().meta({
     description:
       'Último login ou renovação de sessão de qualquer usuário da organização (sem contar o "entrar como").',
