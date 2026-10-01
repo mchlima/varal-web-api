@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0](https://github.com/mchlima/varal-web-api/compare/v0.3.0...v0.4.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **impersonation:** tira o limite de tempo e o motivo do entrar como ([#26](https://github.com/mchlima/varal-web-api/issues/26))
+
+### Features
+
+* **cash:** implementa descontos, pagamentos, paga antes e caixas (fase 6) ([#24](https://github.com/mchlima/varal-web-api/issues/24)) ([ba0f573](https://github.com/mchlima/varal-web-api/commit/ba0f57366828825fcc15989d54e06493d9f13cb9))
+* **impersonation:** tira o limite de tempo e o motivo do entrar como ([#26](https://github.com/mchlima/varal-web-api/issues/26)) ([d81c3ed](https://github.com/mchlima/varal-web-api/commit/d81c3ed18683ca216bcf133e1990e6d9a176600f))
+
 ## [0.3.0](https://github.com/mchlima/varal-web-api/compare/v0.2.0...v0.3.0) (2026-10-01)
 
 
