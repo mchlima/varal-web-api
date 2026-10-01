@@ -8,7 +8,7 @@ Instruções para agentes de código (Claude Code, Codex, Cursor e similares) qu
 
 API do Varal: NestJS com REST em `/api/v1` e WebSocket (Socket.IO) em `/ws`, PostgreSQL, migrations e o `openapi.json` consumido pelos apps. Specs principais: 01 a 07.
 
-Stack: Node 22, TypeScript estrito, NestJS, PostgreSQL 17, Prisma, zod, pg-boss para filas, nodemailer com SMTP Locaweb.
+Stack: Node 26, TypeScript estrito, NestJS, PostgreSQL 17, Prisma, zod, pg-boss para filas, nodemailer com SMTP Locaweb.
 
 ### Comandos
 
