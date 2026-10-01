@@ -3,7 +3,7 @@ import { afterAll, describe, expect, inject, it } from 'vitest';
 import { verifyPassword } from '../../src/auth/password-hasher.js';
 import type { Env } from '../../src/config/env.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { SEED, seed } from '../../scripts/seed.js';
+import { SEED, SEED_MENU, seed } from '../../scripts/seed.js';
 
 const databaseUrl = inject('databaseUrl');
 
@@ -37,6 +37,54 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     await expect(
       platform.platformAdmin.findUnique({ where: { email: 'admin@varal.local' } }),
     ).resolves.not.toBeNull();
+  });
+
+  it('spec 03: the unit has the default template, an example menu and staff with stations', async () => {
+    const result = await seed(platform);
+    const stations = await platform.station.findMany({
+      where: { unitId: result.unitId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(stations.map((station) => station.name)).toEqual([
+      'Balcão',
+      'Cozinha',
+      'Balcão de entrega',
+    ]);
+    const stages = await platform.workflowStage.findMany({
+      where: { unitId: result.unitId },
+      orderBy: { sortOrder: 'asc' },
+    });
+    expect(stages.map((stage) => stage.name)).toEqual([
+      'Recebido',
+      'Preparando',
+      'Pronto',
+      'Entregue',
+    ]);
+    const products = await platform.product.findMany({
+      where: { unitId: result.unitId },
+      include: { modifierGroups: { include: { modifiers: true } } },
+    });
+    expect(products.length).toBe(SEED_MENU.flatMap((category) => category.products).length);
+    const meat = products.find((product) => product.name === 'Espeto de carne');
+    expect(meat?.modifierGroups.map((group) => [group.name, group.minChoices])).toEqual(
+      expect.arrayContaining([
+        ['Ponto da carne', 1],
+        ['Acompanhamentos', 0],
+      ]),
+    );
+    const byName = new Map(stations.map((station) => [station.id, station.name]));
+    const permissions = await platform.staffUnitPermission.findMany({
+      where: { unitId: result.unitId },
+      include: { staffMember: { select: { username: true } } },
+    });
+    expect(
+      Object.fromEntries(
+        permissions.map((permission) => [
+          permission.staffMember.username,
+          permission.stationIds.map((id) => byName.get(id)).sort(),
+        ]),
+      ),
+    ).toEqual({ ana: ['Balcão', 'Balcão de entrega'], bruno: ['Cozinha'] });
   });
 
   it('sets the development password of the owner, the staff and the admin (only while empty)', async () => {
@@ -80,6 +128,12 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
         platform.staffMember.count(),
         platform.staffUnitPermission.count(),
         platform.platformAdmin.count(),
+        platform.station.count(),
+        platform.workflowStage.count(),
+        platform.category.count(),
+        platform.product.count(),
+        platform.modifierGroup.count(),
+        platform.modifier.count(),
       ]);
     const first = await seed(platform);
     const before = await counts();

@@ -3,17 +3,109 @@
  * Run with `pnpm db:seed` (the `scripts/worktree.sh new` calls it after the migrations).
  *
  * - Organization "Espetinho do Piloto" (`pilot`), access code ESPT26 (login link `/e/ESPT26`).
- * - Unit "Barraca da Praça".
- * - Owner dono@varal.local; staff members `ana` (operates cash) and `bruno`.
+ * - Unit "Barraca da Praça" with the default stations and workflow (spec 03, section 4.4) and an
+ *   example skewer menu: categories, products with modifiers (meat doneness, side dishes,
+ *   "Retirar") and drinks routed to the delivery counter (RN-03.08).
+ * - Owner dono@varal.local; staff members `ana` (Balcão and Balcão de entrega, operates cash) and
+ *   `bruno` (Cozinha).
  * - Platform admin admin@varal.local.
  * - DEVELOPMENT ONLY password `varal12345` for the owner, both staff members and the admin. It is set
  *   only while the password is empty, so a password changed locally survives a new seed. The script
  *   refuses to run with NODE_ENV=production.
- *
- * The default stations and workflow of the unit come with spec 03.
  */
+import { AuditService } from '../src/audit/audit.service.js';
 import { hashPassword } from '../src/auth/password-hasher.js';
-import type { PrismaClient } from '../src/generated/prisma/client.js';
+import type { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import { UnitTemplateService } from '../src/units/unit-template.service.js';
+
+interface SeedModifierGroup {
+  name: string;
+  minChoices: number;
+  maxChoices: number;
+  modifiers: readonly { name: string; priceDeltaCents: number }[];
+}
+
+interface SeedProduct {
+  name: string;
+  description?: string;
+  priceCents: number;
+  /** Own preparation station (RN-03.08); otherwise the category's. */
+  station?: string;
+  groups?: readonly SeedModifierGroup[];
+}
+
+const DONENESS: SeedModifierGroup = {
+  name: 'Ponto da carne',
+  minChoices: 1,
+  maxChoices: 1,
+  modifiers: [
+    { name: 'Mal passado', priceDeltaCents: 0 },
+    { name: 'Ao ponto', priceDeltaCents: 0 },
+    { name: 'Bem passado', priceDeltaCents: 0 },
+  ],
+};
+
+const SIDES: SeedModifierGroup = {
+  name: 'Acompanhamentos',
+  minChoices: 0,
+  maxChoices: 3,
+  modifiers: [
+    { name: 'Farofa', priceDeltaCents: 0 },
+    { name: 'Vinagrete', priceDeltaCents: 0 },
+    { name: 'Pão de alho', priceDeltaCents: 300 },
+  ],
+};
+
+/** RN-03.14: removing an ingredient is a zero-delta modifier. */
+const REMOVE: SeedModifierGroup = {
+  name: 'Retirar',
+  minChoices: 0,
+  maxChoices: 2,
+  modifiers: [
+    { name: 'Sem cebola', priceDeltaCents: 0 },
+    { name: 'Sem pimentão', priceDeltaCents: 0 },
+  ],
+};
+
+/** Example menu of the pilot (skewers). Categories go to the Cozinha unless stated. */
+export const SEED_MENU: readonly {
+  name: string;
+  station?: string;
+  products: readonly SeedProduct[];
+}[] = [
+  {
+    name: 'Espetos',
+    products: [
+      { name: 'Espeto de carne', priceCents: 1200, groups: [DONENESS, SIDES] },
+      { name: 'Espeto de frango', priceCents: 1000, groups: [SIDES] },
+      { name: 'Espeto de linguiça', priceCents: 1000, groups: [SIDES] },
+      { name: 'Kafta', priceCents: 1100, groups: [DONENESS, SIDES, REMOVE] },
+      { name: 'Queijo coalho', description: 'Com melaço de cana', priceCents: 900 },
+    ],
+  },
+  {
+    name: 'Porções',
+    products: [
+      { name: 'Pão de alho', priceCents: 700 },
+      { name: 'Mandioca frita', priceCents: 1500 },
+    ],
+  },
+  {
+    name: 'Bebidas',
+    station: 'Balcão de entrega',
+    products: [
+      { name: 'Refrigerante lata', priceCents: 600 },
+      { name: 'Água mineral', priceCents: 400 },
+      { name: 'Suco natural', description: 'Feito na hora', priceCents: 800, station: 'Cozinha' },
+    ],
+  },
+];
+
+/** Stations each seeded staff member opens (by name, from the default template). */
+const SEED_STAFF_STATIONS: Record<string, readonly string[]> = {
+  ana: ['Balcão', 'Balcão de entrega'],
+  bruno: ['Cozinha'],
+};
 
 export const SEED = {
   organization: { name: 'Espetinho do Piloto', accessCode: 'ESPT26' },
@@ -56,6 +148,20 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
       create: { organizationId, name: SEED.unit.name },
       update: {},
     });
+    // RN-03.03: default stations and workflow; does nothing when the unit already has them.
+    await new UnitTemplateService(new AuditService()).applyDefaultTemplate(tx, {
+      organizationId,
+      unitId: unit.id,
+    });
+    const stations = await tx.station.findMany({ where: { organizationId, unitId: unit.id } });
+    const stationId = (name: string): string => {
+      const station = stations.find((row) => row.name === name);
+      if (!station) {
+        throw new Error(`Seed: station "${name}" not found in ${SEED.unit.name}`);
+      }
+      return station.id;
+    };
+    await seedMenu(tx, { organizationId, unitId: unit.id }, stationId);
 
     const owner = await tx.user.upsert({
       where: { email: SEED.owner.email },
@@ -80,11 +186,25 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
         where: { id: member.id, passwordHash: null },
         data: { passwordHash },
       });
-      await tx.staffUnitPermission.upsert({
+      const stationIds = (SEED_STAFF_STATIONS[staff.username] ?? []).map(stationId);
+      const permission = await tx.staffUnitPermission.upsert({
         where: { staffMemberId_unitId: { staffMemberId: member.id, unitId: unit.id } },
-        create: { organizationId, staffMemberId: member.id, unitId: unit.id, canOperateCash },
+        create: {
+          organizationId,
+          staffMemberId: member.id,
+          unitId: unit.id,
+          canOperateCash,
+          stationIds,
+        },
         update: {},
       });
+      // Databases seeded before spec 03 have no stations in the permission yet.
+      if (permission.stationIds.length === 0 && stationIds.length > 0) {
+        await tx.staffUnitPermission.update({
+          where: { id: permission.id },
+          data: { stationIds },
+        });
+      }
       staffMemberIds.push(member.id);
     }
 
@@ -108,6 +228,72 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
   });
 }
 
+/** Creates the example menu once: rows are looked up by name, so a second run adds nothing. */
+async function seedMenu(
+  tx: Prisma.TransactionClient,
+  scope: { organizationId: string; unitId: string },
+  stationId: (name: string) => string,
+): Promise<void> {
+  const { organizationId, unitId } = scope;
+  for (const [categoryIndex, seedCategory] of SEED_MENU.entries()) {
+    const category =
+      (await tx.category.findFirst({
+        where: { organizationId, unitId, name: seedCategory.name },
+      })) ??
+      (await tx.category.create({
+        data: {
+          organizationId,
+          unitId,
+          name: seedCategory.name,
+          sortOrder: categoryIndex + 1,
+          defaultStationId: stationId(seedCategory.station ?? 'Cozinha'),
+        },
+      }));
+    for (const [productIndex, seedProduct] of seedCategory.products.entries()) {
+      if (
+        await tx.product.findFirst({
+          where: { organizationId, categoryId: category.id, name: seedProduct.name },
+        })
+      ) {
+        continue;
+      }
+      const product = await tx.product.create({
+        data: {
+          organizationId,
+          unitId,
+          categoryId: category.id,
+          name: seedProduct.name,
+          description: seedProduct.description ?? null,
+          priceCents: seedProduct.priceCents,
+          stationId: seedProduct.station === undefined ? null : stationId(seedProduct.station),
+          sortOrder: productIndex + 1,
+        },
+      });
+      for (const [groupIndex, seedGroup] of (seedProduct.groups ?? []).entries()) {
+        const group = await tx.modifierGroup.create({
+          data: {
+            organizationId,
+            productId: product.id,
+            name: seedGroup.name,
+            minChoices: seedGroup.minChoices,
+            maxChoices: seedGroup.maxChoices,
+            sortOrder: groupIndex + 1,
+          },
+        });
+        await tx.modifier.createMany({
+          data: seedGroup.modifiers.map((modifier, modifierIndex) => ({
+            organizationId,
+            modifierGroupId: group.id,
+            name: modifier.name,
+            priceDeltaCents: modifier.priceDeltaCents,
+            sortOrder: modifierIndex + 1,
+          })),
+        });
+      }
+    }
+  }
+}
+
 if (import.meta.main) {
   const { loadEnvFiles } = await import('../src/config/load-env.js');
   const { PrismaClient } = await import('../src/generated/prisma/client.js');
@@ -122,7 +308,7 @@ if (import.meta.main) {
     const result = await seed(prisma);
     console.log(
       `Seed ok: organização ${SEED.organization.name} (código ${SEED.organization.accessCode}), ` +
-        `${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
+        `unidade com estações, fluxo e cardápio de exemplo, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
         `Senha de desenvolvimento: ${SEED.devPassword}.`,
     );
   } finally {
