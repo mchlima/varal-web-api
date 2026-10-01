@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/mchlima/varal-web-api/compare/v0.2.0...v0.3.0) (2026-10-01)
+
+
+### Features
+
+* **shifts:** implementa turno, comandas, pedidos e estações (fase 5) ([#22](https://github.com/mchlima/varal-web-api/issues/22)) ([d5be145](https://github.com/mchlima/varal-web-api/commit/d5be14552eeb54f30409c2a2c2ef18c7025952db))
+
 ## [0.2.0](https://github.com/mchlima/varal-web-api/compare/v0.1.0...v0.2.0) (2026-10-01)
 
 
