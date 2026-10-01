@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Imagem de produção da API do Varal (plano, seção 2.4). Prisma 7 não depende de motor em Rust.
 
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -23,7 +23,7 @@ FROM base AS prod-deps
 COPY package.json pnpm-lock.yaml ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile --prod --ignore-scripts
 
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
