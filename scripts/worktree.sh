@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Worktrees isolados para vários agentes em paralelo (spec 01, seção 4.1: RN-01.06 a RN-01.08 e RN-01.13).
 #
-#   scripts/worktree.sh new <tipo>/<descricao>   cria .worktrees/<tipo>-<descricao> a partir de origin/main,
+#   scripts/worktree.sh new <tipo>/<descricao>   cria ../.worktrees/varal-web-api/<tipo>-<descricao> a partir de origin/main,
 #                                                com PORT_OFFSET livre, .env.local, dependências, bancos e migrations
 #   scripts/worktree.sh list                     lista worktrees com branch, PORT_OFFSET, porta e banco
 #   scripts/worktree.sh remove <nome>            remove o worktree (recusa se houver alterações sem commit)
@@ -46,7 +46,9 @@ main_root() {
 
 ROOT="$(main_root)"
 readonly ROOT
-readonly WORKTREES_DIR="$ROOT/.worktrees"
+# Os worktrees ficam fora do repositório, em <pasta comum>/.worktrees/varal-web-api/<nome>,
+# para que ferramentas que sobem pelas pastas não encontrem a configuração do checkout principal.
+readonly WORKTREES_DIR="$(dirname "$ROOT")/.worktrees/$(basename "$ROOT")"
 
 # Lê uma chave de um arquivo .env (sem executar o arquivo).
 env_value() {
@@ -231,7 +233,7 @@ print_worktree() {
 cmd_remove() {
   local name="${1:-}"
   [[ -n "$name" ]] || usage 1
-  name="${name#.worktrees/}"
+  name="${name##*/}"
   name="${name//\//-}"
   [[ "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "nome inválido: '$name'"
   local path="$WORKTREES_DIR/$name"

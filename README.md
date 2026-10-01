@@ -44,7 +44,7 @@ Variáveis em [`.env.example`](.env.example), validadas com zod no boot (a API n
 ## Worktrees (spec 01, seção 4.1)
 
 ```bash
-scripts/worktree.sh new <tipo>/<descricao>   # .worktrees/<tipo>-<descricao>, a partir de origin/main
+scripts/worktree.sh new <tipo>/<descricao>   # ../.worktrees/varal-web-api/<tipo>-<descricao>, a partir de origin/main
 scripts/worktree.sh list                     # branch, PORT_OFFSET, porta e banco de cada worktree
 scripts/worktree.sh remove <tipo>-<descricao>  # recusa se houver alterações sem commit; apaga só os bancos dele
 ```

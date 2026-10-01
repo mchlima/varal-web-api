@@ -129,13 +129,14 @@ Cada repositório é trabalhado por vários agentes em paralelo. Para que um nã
 ### Cada agente no seu worktree
 
 - **O checkout principal (a raiz do repositório) fica sempre na `main`, limpo.** Ninguém edita arquivos nem troca de branch nele; ele só serve de base.
-- Cada tarefa roda num **git worktree próprio**, dentro de `.worktrees/` (ignorada pelo git), com a sua branch:
+- Cada tarefa roda num **git worktree próprio**, com a sua branch, **fora do repositório**: na pasta comum `varal/.worktrees/<repositório>/<tipo>-<descricao>` (ao lado dos repositórios, fora de qualquer git). Rodando da raiz do repositório:
   ```
-  git fetch origin && git worktree add .worktrees/<tipo>-<descricao> -b <tipo>/<descricao> origin/main
+  git fetch origin && git worktree add ../.worktrees/<repositório>/<tipo>-<descricao> -b <tipo>/<descricao> origin/main
   ```
-  Nos repositórios de código, prefira `scripts/worktree.sh new <tipo>/<descricao>`, que também prepara portas e banco (spec 01, seção 4.1).
+  Nos repositórios de código, use `scripts/worktree.sh new <tipo>/<descricao>`, que cria o worktree nesse lugar e também prepara portas e banco (spec 01, seção 4.1).
+- **Nunca crie worktree dentro do repositório** (nem em `.worktrees/`, nem em `.claude/worktrees/`, que é onde a ferramenta `EnterWorktree` do Claude Code cria). Ferramentas que sobem pelas pastas procurando configuração (Nuxt, Vite, TypeScript) encontrariam a do checkout principal, e o build e os testes quebram.
 - Trabalhe, rode comandos e faça commits **somente dentro do seu worktree**. Nunca edite arquivos de outro worktree nem da raiz.
-- Ao terminar (PR aceito ou tarefa abandonada), remova o worktree (`scripts/worktree.sh remove <nome>` ou `git worktree remove .worktrees/<nome>`).
+- Ao terminar (PR aceito ou tarefa abandonada), remova o worktree (`scripts/worktree.sh remove <nome>` ou `git worktree remove ../.worktrees/<repositório>/<nome>`).
 
 ### Antes de começar
 
