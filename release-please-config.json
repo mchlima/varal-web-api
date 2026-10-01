@@ -14,7 +14,8 @@
           "path": "openapi.json",
           "jsonpath": "$.info.version"
         }
-      ]
+      ],
+      "initial-version": "0.1.0"
     }
   }
 }
