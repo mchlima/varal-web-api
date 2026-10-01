@@ -9,10 +9,12 @@ import { z } from 'zod';
 
 import { AppModule } from '../../src/app.module.js';
 import { configureApp } from '../../src/app.setup.js';
+import { Public } from '../../src/auth/auth.decorators.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 
 const SampleBody = z.object({ name: z.string().min(1) });
 
+@Public()
 @Controller('sample')
 class SampleController {
   @Post()

@@ -1,6 +1,18 @@
 {
   "components": {
     "schemas": {
+      "AccessCodeOrganization": {
+        "additionalProperties": false,
+        "properties": {
+          "organizationName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "organizationName"
+        ],
+        "type": "object"
+      },
       "ActorType": {
         "description": "Quem fez a ação registrada na auditoria.",
         "enum": [
@@ -10,6 +22,94 @@
           "system"
         ],
         "type": "string"
+      },
+      "AdminLoginRequestInput": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 254,
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
+      "AdminMe": {
+        "additionalProperties": false,
+        "properties": {
+          "admin": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "email"
+            ],
+            "type": "object"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionInfo"
+          }
+        },
+        "required": [
+          "admin",
+          "session"
+        ],
+        "type": "object"
+      },
+      "AuthErrorCode": {
+        "description": "Códigos de erro da autenticação (spec 01, seção 7).",
+        "enum": [
+          "INVALID_CREDENTIALS",
+          "INVALID_STAFF_CREDENTIALS",
+          "LOGIN_TEMPORARILY_LOCKED",
+          "INVALID_PASSWORD_TOKEN",
+          "WRONG_CURRENT_PASSWORD",
+          "PASSWORD_RESET_LIMIT_REACHED",
+          "DEVICE_ID_REQUIRED"
+        ],
+        "type": "string"
+      },
+      "ChangePasswordRequestInput": {
+        "properties": {
+          "currentPassword": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "newPassword": {
+            "description": "Nova senha: de 8 a 128 caracteres.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          }
+        },
+        "required": [
+          "currentPassword",
+          "newPassword"
+        ],
+        "type": "object"
       },
       "EmailStatus": {
         "description": "Situação de um envio de e-mail.",
@@ -30,6 +130,62 @@
           "admin_password_reset"
         ],
         "type": "string"
+      },
+      "EmailUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "description": "E-mails enfileirados ou enviados no mês (falhas não contam).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "level": {
+            "$ref": "#/components/schemas/EmailUsageLevel"
+          },
+          "limit": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "month": {
+            "description": "Mês em `America/Sao_Paulo` (AAAA-MM).",
+            "example": "2026-10",
+            "type": "string"
+          },
+          "warningThreshold": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "month",
+          "count",
+          "limit",
+          "warningThreshold",
+          "level"
+        ],
+        "type": "object"
+      },
+      "EmailUsageLevel": {
+        "description": "RN-01.04: `warning` a partir de 8.000 envios no mês (alerta no admin); `critical` a partir de 10.000 (só convites e redefinições continuam).",
+        "enum": [
+          "ok",
+          "warning",
+          "critical"
+        ],
+        "type": "string"
+      },
+      "EmailUsageQueryInput": {
+        "properties": {
+          "month": {
+            "description": "Mês em `America/Sao_Paulo` (AAAA-MM). Padrão: o mês atual.",
+            "pattern": "^\\d{4}-(0[1-9]|1[0-2])$",
+            "type": "string"
+          }
+        },
+        "type": "object"
       },
       "ErrorCode": {
         "description": "Códigos genéricos de erro; cada módulo pode ter os seus.",
@@ -60,9 +216,7 @@
             "properties": {
               "code": {
                 "description": "Código estável, em inglês (ex.: `NOT_FOUND`, `TAB_ALREADY_CLOSED`).",
-                "examples": [
-                  "VALIDATION_FAILED"
-                ],
+                "example": "VALIDATION_FAILED",
                 "type": "string"
               },
               "details": {
@@ -91,6 +245,32 @@
         ],
         "type": "object"
       },
+      "ForgotPasswordRequestInput": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 254,
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "type": "object"
+      },
+      "ForgotPasswordResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
       "HealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -114,6 +294,26 @@
         ],
         "type": "object"
       },
+      "OwnerLoginRequestInput": {
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 254,
+            "pattern": "^(?:[A-Za-z0-9_'+\\-]+\\.)*[A-Za-z0-9_'+\\-]*[A-Za-z0-9_+-]@(?:[A-Za-z0-9][A-Za-z0-9\\-]*\\.)+[A-Za-z]{2,}$",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "type": "object"
+      },
       "PaginationQuery": {
         "additionalProperties": false,
         "properties": {
@@ -131,6 +331,210 @@
         },
         "required": [
           "limit"
+        ],
+        "type": "object"
+      },
+      "PanelMe": {
+        "additionalProperties": false,
+        "description": "Perfil, organização, unidades e estações permitidas.",
+        "properties": {
+          "organization": {
+            "additionalProperties": false,
+            "properties": {
+              "accessCode": {
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "subscriptionStatus": {
+                "$ref": "#/components/schemas/SubscriptionStatus"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "accessCode",
+              "subscriptionStatus"
+            ],
+            "type": "object"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionInfo"
+          },
+          "subject": {
+            "additionalProperties": false,
+            "properties": {
+              "email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "owner",
+                  "staff"
+                ],
+                "type": "string"
+              },
+              "username": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "type",
+              "id",
+              "name",
+              "email",
+              "username"
+            ],
+            "type": "object"
+          },
+          "units": {
+            "items": {
+              "$ref": "#/components/schemas/PanelUnit"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "subject",
+          "organization",
+          "units",
+          "session"
+        ],
+        "type": "object"
+      },
+      "PanelUnit": {
+        "additionalProperties": false,
+        "properties": {
+          "allStations": {
+            "type": "boolean"
+          },
+          "canOperateCash": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "stationIds": {
+            "items": {
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "allStations",
+          "stationIds",
+          "canOperateCash"
+        ],
+        "type": "object"
+      },
+      "ResetPasswordRequestInput": {
+        "properties": {
+          "password": {
+            "description": "Nova senha: de 8 a 128 caracteres.",
+            "maxLength": 128,
+            "minLength": 8,
+            "type": "string"
+          },
+          "token": {
+            "description": "Token do link (fragmento `#token=`).",
+            "maxLength": 200,
+            "minLength": 20,
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "password"
+        ],
+        "type": "object"
+      },
+      "SessionInfo": {
+        "additionalProperties": false,
+        "properties": {
+          "accessTokenExpiresAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "deviceId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "Fim da sessão se não for renovada.",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "deviceId",
+          "accessTokenExpiresAt",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "StaffLoginRequestInput": {
+        "properties": {
+          "accessCode": {
+            "description": "Código do estabelecimento (6 caracteres), o mesmo do link `/e/{code}`.",
+            "example": "ESPT26",
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          "username": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "accessCode",
+          "username",
+          "password"
         ],
         "type": "object"
       },
@@ -177,6 +581,20 @@
         ],
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "adminSession": {
+        "description": "Sessão do admin da plataforma, definida pelo login do admin.",
+        "in": "cookie",
+        "name": "__Host-varal_admin_at",
+        "type": "apiKey"
+      },
+      "panelSession": {
+        "description": "Sessão do app dos clientes (dono e colaborador), definida pelo login.",
+        "in": "cookie",
+        "name": "__Host-varal_at",
+        "type": "apiKey"
+      }
     }
   },
   "info": {
@@ -187,6 +605,929 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/auth/login": {
+      "post": {
+        "operationId": "AdminAuthController_login",
+        "parameters": [
+          {
+            "description": "UUID guardado no aparelho; obrigatório no login e gravado na sessão (spec 01, seção 7.2).",
+            "in": "header",
+            "name": "X-Device-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminLoginRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMe"
+                }
+              }
+            },
+            "description": "Sessão do admin aberta; cookies definidos."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Credenciais inválidas: sempre a mesma resposta, exista ou não o usuário."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`LOGIN_TEMPORARILY_LOCKED` (10 senhas erradas seguidas bloqueiam o identificador por 15 min) ou `RATE_LIMITED`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Login do admin da plataforma",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/logout": {
+      "post": {
+        "operationId": "AdminAuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Sessão encerrada (ou já não havia sessão); cookies apagados."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Encerra a sessão do admin neste aparelho",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/me": {
+      "get": {
+        "operationId": "AdminAuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMe"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do admin ou sessão encerrada."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Admin logado",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/password/change": {
+      "post": {
+        "operationId": "AdminAuthController_change",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description": "Senha trocada; as outras sessões foram encerradas e este aparelho recebeu uma sessão nova."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`WRONG_CURRENT_PASSWORD` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do admin ou sessão encerrada."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 10 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Troca a senha do admin (logado)",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/password/forgot": {
+      "post": {
+        "operationId": "AdminAuthController_forgot",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
+              }
+            },
+            "description": "Sempre a mesma resposta, exista ou não o e-mail (RN-01.03)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 5 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Admin pede o link de redefinição de senha",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/password/reset": {
+      "post": {
+        "operationId": "AdminAuthController_reset",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Senha definida; todas as sessões do admin foram encerradas."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_PASSWORD_TOKEN` ou `VALIDATION_FAILED`."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 10 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Define a senha do admin com o token de um convite ou de uma redefinição",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/auth/refresh": {
+      "post": {
+        "operationId": "AdminAuthController_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description": "Novos cookies definidos."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem token de renovação válido; cookies apagados."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Renova a sessão do admin",
+        "tags": [
+          "admin-auth"
+        ]
+      }
+    },
+    "/api/v1/admin/emails/usage": {
+      "get": {
+        "operationId": "AdminEmailsController_usage",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailUsage"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do admin ou sessão encerrada."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "adminSession": []
+          }
+        ],
+        "summary": "Consumo de e-mails do mês e nível do alerta (RN-01.04)",
+        "tags": [
+          "admin-emails"
+        ]
+      }
+    },
+    "/api/v1/auth/access-code/{code}": {
+      "get": {
+        "operationId": "AuthController_accessCode",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "code",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCodeOrganization"
+                }
+              }
+            },
+            "description": ""
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Código inexistente."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 30 requisições em 60 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Nome da organização de um código de estabelecimento",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "AuthController_logout",
+        "parameters": [],
+        "responses": {
+          "204": {
+            "description": "Sessão encerrada (ou já não havia sessão); cookies apagados."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Encerra a sessão deste aparelho",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "operationId": "AuthController_me",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanelMe"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Perfil, organização, unidades e estações permitidas",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/owner/login": {
+      "post": {
+        "operationId": "AuthController_ownerLogin",
+        "parameters": [
+          {
+            "description": "UUID guardado no aparelho; obrigatório no login e gravado na sessão (spec 01, seção 7.2).",
+            "in": "header",
+            "name": "X-Device-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OwnerLoginRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanelMe"
+                }
+              }
+            },
+            "description": "Sessão aberta; cookies definidos."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Credenciais inválidas: sempre a mesma resposta, exista ou não o usuário."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`LOGIN_TEMPORARILY_LOCKED` (10 senhas erradas seguidas bloqueiam o identificador por 15 min) ou `RATE_LIMITED`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Login do dono (e-mail e senha)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/change": {
+      "post": {
+        "operationId": "AuthController_change",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description": "Senha trocada; as outras sessões foram encerradas e este aparelho recebeu uma sessão nova."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`WRONG_CURRENT_PASSWORD` ou `VALIDATION_FAILED`."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 10 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Troca a senha (logado)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/forgot": {
+      "post": {
+        "operationId": "AuthController_forgot",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
+              }
+            },
+            "description": "Sempre a mesma resposta, exista ou não o e-mail (RN-01.03)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 5 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Dono pede o link de redefinição de senha",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/reset": {
+      "post": {
+        "operationId": "AuthController_reset",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Senha definida; todas as sessões do usuário foram encerradas."
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`INVALID_PASSWORD_TOKEN` ou `VALIDATION_FAILED` (senha com menos de 8 caracteres)."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`RATE_LIMITED`: mais de 10 requisições em 900 s deste IP."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Define a senha com o token de um convite ou de uma redefinição",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "operationId": "AuthController_refresh",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            },
+            "description": "Novos cookies definidos."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem token de renovação válido; cookies apagados."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Renova a sessão (gira o token de renovação)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/staff/login": {
+      "post": {
+        "operationId": "AuthController_staffLogin",
+        "parameters": [
+          {
+            "description": "UUID guardado no aparelho; obrigatório no login e gravado na sessão (spec 01, seção 7.2).",
+            "in": "header",
+            "name": "X-Device-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StaffLoginRequestInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PanelMe"
+                }
+              }
+            },
+            "description": "Sessão aberta; cookies definidos."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Credenciais inválidas: sempre a mesma resposta, exista ou não o usuário."
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`LOGIN_TEMPORARILY_LOCKED` (10 senhas erradas seguidas bloqueiam o identificador por 15 min) ou `RATE_LIMITED`."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "summary": "Login do colaborador (código do estabelecimento, usuário e senha)",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/health": {
       "get": {
         "operationId": "HealthController_check",

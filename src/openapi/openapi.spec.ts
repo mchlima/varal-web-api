@@ -38,6 +38,19 @@ describe('mergeContractSchemas (RN-01.10)', () => {
     expect(() => mergeContractSchemas(emptyDocument(), [z.string()])).toThrow(/\.meta\(\{ id \}\)/);
   });
 
+  it('accepts a schema a route already published with `example` instead of `examples`', () => {
+    const Named = z.object({ code: z.string().meta({ examples: ['X'] }) }).meta({ id: 'Named' });
+    const document = emptyDocument();
+    const fromRoute = {
+      type: 'object',
+      properties: { code: { type: 'string', example: 'X' } },
+      required: ['code'],
+      additionalProperties: false,
+    };
+    document.components = { schemas: { Named: fromRoute } };
+    expect(mergeContractSchemas(document, [Named]).components?.schemas?.Named).toEqual(fromRoute);
+  });
+
   it('rejects two different schemas with the same id', () => {
     const other = z.enum(['x']).meta({ id: 'SampleStatus' });
     expect(() => mergeContractSchemas(emptyDocument(), [SampleStatus, other])).toThrow(

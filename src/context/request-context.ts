@@ -23,6 +23,8 @@ export interface AuthContext {
   organizationId: string | null;
   actor: Actor;
   impersonatorId?: string | null;
+  /** Session of the logged-in subject (`sessions.id`), set by the authentication guard. */
+  sessionId?: string | null;
 }
 
 /** Per-request data available anywhere down the call chain (spec 01, section 6). */

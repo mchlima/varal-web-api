@@ -1,14 +1,14 @@
-import { type CanActivate, type ExecutionContext, Injectable, Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { type CanActivate, type ExecutionContext, Injectable } from '@nestjs/common';
 import type { Request } from 'express';
 
 import { type AuthContext, setAuthContext } from '../../src/context/request-context.js';
 import type { ActorType } from '../../src/generated/prisma/enums.js';
 
 /**
- * TEST ONLY. Stands in for the authentication of phase 1b: reads the actor from `X-Test-*` headers
- * and fills the request context with `setAuthContext`, exactly where the real guard will.
- * Never imported by `src/`.
+ * TEST ONLY. Stands in for the real `AuthGuard` (phase 1b) in tests of the infrastructure: reads the
+ * actor from `X-Test-*` headers and fills the request context with `setAuthContext`, exactly where
+ * the real guard does. `createTestApp()` swaps it in by default; `createTestApp({ auth: 'real' })`
+ * keeps the real cookie authentication. Never imported by `src/`.
  */
 export const TEST_AUTH_HEADERS = {
   organizationId: 'X-Test-Organization-Id',
@@ -39,9 +39,6 @@ export class StubAuthGuard implements CanActivate {
     return true;
   }
 }
-
-@Module({ providers: [{ provide: APP_GUARD, useClass: StubAuthGuard }] })
-export class StubAuthModule {}
 
 /** Headers that make {@link StubAuthGuard} authenticate the request as `auth`. */
 export function authHeaders(auth: AuthContext): Record<string, string> {
