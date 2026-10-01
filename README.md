@@ -21,21 +21,22 @@ Sem o script, num checkout já existente: `pnpm install`, copie `.env.example` p
 
 ## Comandos
 
-| Comando                             | O que faz                                                                |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| `pnpm install`                      | Instala dependências e gera o Prisma Client em `src/generated/prisma`    |
-| `pnpm dev`                          | Sobe a API em modo watch (porta `PORT`, padrão 3000)                     |
-| `pnpm build` / `pnpm start`         | Compila para `dist/` / roda `dist/main.js`                               |
-| `pnpm test`                         | Testes unitários, e2e e de integração (estes só com `DATABASE_URL_TEST`) |
-| `pnpm test:watch`                   | Testes em modo watch                                                     |
-| `pnpm lint`                         | ESLint com regras que usam tipos                                         |
-| `pnpm format` / `pnpm format:check` | Prettier                                                                 |
-| `pnpm typecheck`                    | `tsc --noEmit`                                                           |
-| `pnpm openapi`                      | Gera o `openapi.json` sem subir servidor nem conectar no banco           |
-| `pnpm db:migrate`                   | `prisma migrate dev` (só na máquina de desenvolvimento)                  |
-| `pnpm db:deploy`                    | `prisma migrate deploy` (CI e deploy)                                    |
-| `pnpm db:generate`                  | Regenera o Prisma Client (rode depois de `db:migrate`)                   |
-| `pnpm db:seed`                      | Dados de exemplo, idempotente (o `scripts/worktree.sh new` já roda)      |
+| Comando                                   | O que faz                                                                         |
+| ----------------------------------------- | --------------------------------------------------------------------------------- |
+| `pnpm install`                            | Instala dependências e gera o Prisma Client em `src/generated/prisma`             |
+| `pnpm dev`                                | Sobe a API em modo watch (porta `PORT`, padrão 3000)                              |
+| `pnpm build` / `pnpm start`               | Compila para `dist/` / roda `dist/main.js`                                        |
+| `pnpm test`                               | Testes unitários, e2e e de integração (estes só com `DATABASE_URL_TEST`)          |
+| `pnpm test:watch`                         | Testes em modo watch                                                              |
+| `pnpm lint`                               | ESLint com regras que usam tipos                                                  |
+| `pnpm format` / `pnpm format:check`       | Prettier                                                                          |
+| `pnpm typecheck`                          | `tsc --noEmit`                                                                    |
+| `pnpm openapi`                            | Gera o `openapi.json` sem subir servidor nem conectar no banco                    |
+| `pnpm db:migrate`                         | `prisma migrate dev` (só na máquina de desenvolvimento)                           |
+| `pnpm db:deploy`                          | `prisma migrate deploy` (CI e deploy)                                             |
+| `pnpm db:generate`                        | Regenera o Prisma Client (rode depois de `db:migrate`)                            |
+| `pnpm db:seed`                            | Dados de exemplo, idempotente (o `scripts/worktree.sh new` já roda)               |
+| `pnpm admin:create -- --name … --email …` | Cria um admin da plataforma e envia o convite ([Primeiro admin](#primeiro-admin)) |
 
 Saúde: `GET /api/v1/health` responde `{ "status": "ok", "db": "ok" | "unavailable" }`.
 
@@ -129,6 +130,24 @@ curl -c jar.txt -H 'X-Device-Id: 0192f000-0000-7000-8000-000000000001' -H 'conte
   -d '{"email":"dono@varal.local","password":"varal12345"}' http://localhost:3000/api/v1/auth/owner/login
 curl -b jar.txt http://localhost:3000/api/v1/auth/me
 ```
+
+## Primeiro admin
+
+Enquanto a tela de usuários do admin não existe (spec 02, fase 3), o primeiro acesso ao admin em produção é criado por linha de comando:
+
+```bash
+# Produção (VPS): dentro do container da API, que já tem DATABASE_URL, ADMIN_URL e o SMTP no ambiente
+docker exec varal-api node dist/cli/create-platform-admin.js --name "Nome da Pessoa" --email pessoa@exemplo.com
+
+# Desenvolvimento (banco do worktree, e-mail no Mailpit em http://localhost:8025)
+pnpm admin:create -- --name "Nome da Pessoa" --email pessoa@exemplo.com
+```
+
+- Valida nome e e-mail (guardado em minúsculas) e recusa, com código de saída 1, se já existir admin com o e-mail; argumentos inválidos saem com 2 e `--help` mostra o uso.
+- Numa transação: cria o `platform_admin` ativo e sem senha, gera o convite (7 dias, seção 7.4), enfileira o e-mail `admin_invite` e grava a auditoria `platform_admin.created` com ator `system` (o `actor_type` que jobs e scripts já usam), `metadata.source = "cli"` e `request_id` `cli-<uuid>`.
+- **Quem envia o e-mail é o worker da API em execução** (fila `email.send`): o comando sobe só um contexto enxuto do Nest com o pg-boss em modo produtor (`PG_BOSS_WORKERS = false`: sem workers, sem cron), enfileira e encerra. Em produção, rodando com `docker exec` no `varal-api`, o e-mail sai pelo worker do próprio container; em desenvolvimento, deixe o `pnpm dev` rodando para o convite chegar ao Mailpit.
+- A saída nunca mostra o token nem o link, só `Convite enviado para <email>`. Se o convite vencer antes do primeiro acesso, use "Esqueci a senha" na tela de login do admin.
+- **RBAC (fase 3):** este admin não tem papel, porque os papéis ainda não existem na API. Quando a spec 02 trouxer `roles` e `platform_admin_roles`, a migration ou o seed dos papéis deve dar o papel **Super admin** ao admin criado por este comando (RN-02.05 exige pelo menos um Super admin ativo).
 
 ## Autenticação (spec 01, seção 7)
 
@@ -281,4 +300,4 @@ O `openapi.json` na raiz é o contrato consumido pelos apps (RN-01.09). Todo PR 
 
 ## Imagem
 
-`Dockerfile` multi-stage sobre `node:26-alpine`, rodando como `node`: `docker build -t varal-web-api .`. A imagem inclui o CLI do Prisma para o `prisma migrate deploy` do deploy.
+`Dockerfile` multi-stage sobre `node:26-alpine`, rodando como `node`: `docker build -t varal-web-api .`. A imagem inclui o CLI do Prisma para o `prisma migrate deploy` do deploy e o comando `dist/cli/create-platform-admin.js` ([Primeiro admin](#primeiro-admin)).

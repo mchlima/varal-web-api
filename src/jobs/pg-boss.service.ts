@@ -6,6 +6,7 @@ import {
   Logger,
   type OnApplicationBootstrap,
   type OnApplicationShutdown,
+  Optional,
 } from '@nestjs/common';
 import { type Db, fromPrisma, PgBoss, type Queue } from 'pg-boss';
 
@@ -19,6 +20,13 @@ export const PG_BOSS_SCHEMA = 'pgboss';
 const RETRY_START_MIN_MS = 1_000;
 const RETRY_START_MAX_MS = 30_000;
 const READY_TIMEOUT_MS = 10_000;
+
+/**
+ * Optional provider (boolean, default `true`). `false` makes a producer-only pg-boss, for command
+ * line tools that only enqueue jobs (`src/cli`): no workers, no cron schedules, no supervision, so
+ * the jobs are processed by the workers of the running API.
+ */
+export const PG_BOSS_WORKERS = Symbol('PG_BOSS_WORKERS');
 
 /** A queue and how its jobs are processed, registered by the modules in `onModuleInit`. */
 export interface QueueDefinition {
@@ -57,13 +65,17 @@ export class PgBossService implements OnApplicationBootstrap, OnApplicationShutd
   private readyPromise: Promise<void> | undefined;
   private started = false;
 
-  constructor(@Inject(APP_ENV) env: Env) {
+  constructor(
+    @Inject(APP_ENV) env: Env,
+    @Optional() @Inject(PG_BOSS_WORKERS) private readonly workers = true,
+  ) {
     this.boss = new PgBoss({
       connectionString: env.DATABASE_URL,
       max: PG_BOSS_POOL_MAX,
       schema: PG_BOSS_SCHEMA,
-      application_name: 'varal-api-jobs',
+      application_name: workers ? 'varal-api-jobs' : 'varal-cli-jobs',
       connectionTimeoutMillis: 2_000,
+      ...(workers ? {} : { supervise: false, schedule: false }),
     });
     // Without a listener an 'error' event would crash the process.
     this.boss.on('error', (error: Error) => {
@@ -166,6 +178,10 @@ export class PgBossService implements OnApplicationBootstrap, OnApplicationShutd
         await this.boss.updateQueue(definition.name, definition.options);
       } else {
         await this.boss.createQueue(definition.name, definition.options);
+      }
+      if (!this.workers) {
+        // Producer only: the queue exists, the running API schedules and processes it.
+        continue;
       }
       if (definition.schedule) {
         await this.boss.schedule(definition.name, definition.schedule, null, {
