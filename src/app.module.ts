@@ -13,6 +13,7 @@ import { HealthModule } from './health/health.module.js';
 import { IdempotencyModule } from './idempotency/idempotency.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { MenuModule } from './menu/menu.module.js';
+import { OperationModule } from './operation/operation.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
 import { StaffModule } from './staff/staff.module.js';
@@ -35,6 +36,7 @@ import { UnitsModule } from './units/units.module.js';
     RealtimeModule,
     UnitsModule,
     MenuModule,
+    OperationModule,
     StaffModule,
     HealthModule,
   ],

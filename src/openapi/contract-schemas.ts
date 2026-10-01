@@ -20,6 +20,9 @@ import {
   ErrorResponseSchema,
   ValidationErrorDetailsSchema,
 } from '../errors/error-response.schema.js';
+import { OperationErrorCodeSchema } from '../operation/operation-errors.js';
+import { operationEventSchemas } from '../operation/operation-events.js';
+import { operationContractSchemas } from '../operation/operation.schemas.js';
 import { realtimeContractSchemas } from '../realtime/realtime.contracts.js';
 import { SetupErrorCodeSchema } from '../units/setup-errors.js';
 import { setupEventSchemas } from '../units/setup-events.js';
@@ -57,6 +60,10 @@ export const contractSchemas: readonly z.ZodType[] = [
   SetupErrorCodeSchema,
   ...unitContractSchemas,
   ...setupEventSchemas,
+  // Spec 04: operation (shifts, tabs, orders, items).
+  OperationErrorCodeSchema,
+  ...operationContractSchemas,
+  ...operationEventSchemas,
 ];
 
 /**
