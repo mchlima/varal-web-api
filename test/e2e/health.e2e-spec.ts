@@ -87,7 +87,9 @@ describe('GET /api/v1/health with the database up', () => {
   beforeAll(async () => {
     vi.stubEnv('DATABASE_URL', 'postgresql://varal:varal@127.0.0.1:1/varal_unused');
     vi.stubEnv('CORS_ORIGINS', 'http://localhost:3100');
-    app = await createApp({ $queryRaw: vi.fn().mockResolvedValue([{ ok: 1 }]) as never });
+    app = await createApp({
+      db: { $queryRaw: vi.fn().mockResolvedValue([{ ok: 1 }]) },
+    } as unknown as Partial<PrismaService>);
   });
 
   afterEach(() => {
