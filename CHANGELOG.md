@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.7.0](https://github.com/mchlima/varal-web-api/compare/v0.6.0...v0.7.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **cash:** rotas e eventos de turno removidos; o painel precisa sair na mesma release.
+
+### Features
+
+* **cash:** troca o turno pelo caixa da unidade, tabelas de preço e eventos (fase 7.5) ([#31](https://github.com/mchlima/varal-web-api/issues/31)) ([10c52a2](https://github.com/mchlima/varal-web-api/commit/10c52a2c310e3deac6da5f99e5c66cfdad0de53c))
+
 ## [0.6.0](https://github.com/mchlima/varal-web-api/compare/v0.5.0...v0.6.0) (2026-10-02)
 
 
