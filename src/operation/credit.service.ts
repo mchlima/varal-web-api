@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service.js';
+import { decodeKeysetCursor, encodeKeysetCursor } from '../common/pagination.js';
 import { updateWithVersion } from '../common/versioned-update.js';
 import { requireOrganizationId } from '../context/request-context.js';
 import { AppError } from '../errors/app-error.js';
@@ -11,6 +12,7 @@ import type {
   CreateCustomerRequest,
   CustomerDetailDto,
   CustomerDto,
+  CustomerListDto,
   CustomerListQuery,
   PutOnCreditRequest,
   ReceivablesDto,
@@ -87,8 +89,11 @@ export class CreditService {
     private readonly events: OperationEvents,
   ) {}
 
-  /** `GET /units/{id}/customers?q=` (RN-06.02, CA-06.04, CA-06.06). */
-  async list(unitId: string, query: CustomerListQuery): Promise<CustomerDto[]> {
+  /**
+   * `GET /units/{id}/customers?q=&limit=&cursor=` (RN-06.02, CA-06.04, CA-06.06): in name order,
+   * paginated by a keyset cursor (name, id).
+   */
+  async list(unitId: string, query: CustomerListQuery): Promise<CustomerListDto> {
     const db = this.prisma.db;
     assertCounter(await this.access.forUnit(db, unitId));
     const q = query.q ?? '';
@@ -103,12 +108,27 @@ export class CreditService {
         or.push({ phone: { contains: digits } }, { cpf: { contains: digits } });
       }
     }
+    const after = query.cursor === undefined ? null : decodeKeysetCursor(query.cursor);
     const rows = await db.customer.findMany({
-      where: { unitId, anonymizedAt: null, ...(or.length > 0 ? { OR: or } : {}) },
+      where: {
+        unitId,
+        anonymizedAt: null,
+        AND: [
+          or.length > 0 ? { OR: or } : {},
+          after === null
+            ? {}
+            : { OR: [{ name: { gt: after.key } }, { name: after.key, id: { gt: after.id } }] },
+        ],
+      },
       orderBy: [{ name: 'asc' }, { id: 'asc' }],
-      take: query.limit,
+      take: query.limit + 1,
     });
-    return rows.map(toCustomerDto);
+    const data = rows.slice(0, query.limit);
+    const last = data.at(-1);
+    return {
+      data: data.map(toCustomerDto),
+      nextCursor: rows.length > query.limit && last ? encodeKeysetCursor(last.name, last.id) : null,
+    };
   }
 
   /** `POST /units/{id}/customers`: only the name is required (RN-06.01, CA-06.06). */
@@ -176,7 +196,8 @@ export class CreditService {
   /**
    * `DELETE /customers/{id}` (RN-06.03, CA-06.05): refused while the customer has a balance to
    * receive; otherwise name and identification data are erased (the name becomes "Cliente
-   * removido") and the tabs stay in the history.
+   * removido") and the tabs stay in the history, with their `customer_name` also replaced by
+   * "Cliente removido" in the same transaction (LGPD).
    */
   async remove(id: string): Promise<CustomerDto> {
     return this.prisma.transaction(async (db) => {
@@ -205,13 +226,18 @@ export class CreditService {
           version: { increment: 1 },
         },
       });
+      // RN-06.03: the name typed on the tabs of the customer is personal data too.
+      const renamed = await db.tab.updateMany({
+        where: { customerId: id },
+        data: { customerName: REMOVED_CUSTOMER_NAME, version: { increment: 1 } },
+      });
       await this.audit.record(db, {
         action: 'customer.anonymized',
         entityType: 'customer',
         entityId: id,
         before: { removedAt: null },
         after: { removedAt: now.toISOString() },
-        metadata: { unitId: customer.unitId },
+        metadata: { unitId: customer.unitId, tabsRenamed: renamed.count },
       });
       return toCustomerDto(removed);
     });

@@ -30,6 +30,7 @@ import {
   type CustomerDetailDto,
   CustomerDetailSchema,
   type CustomerDto,
+  type CustomerListDto,
   CustomerListSchema,
   type CustomerListQuery,
   CustomerListQuerySchema,
@@ -77,7 +78,7 @@ export class CreditController {
   @Get('units/:id/customers')
   @ApiOperation({
     summary:
-      'Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação (RN-06.02, CA-06.04)',
+      'Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação, paginada por cursor em ordem de nome (RN-06.02, CA-06.04)',
   })
   @ApiOkResponse({ standardSchema: CustomerListSchema })
   @NotFoundResponse()
@@ -85,8 +86,8 @@ export class CreditController {
   async list(
     @Param('id', IdPipe) id: string,
     @Query({ schema: CustomerListQuerySchema }) query: CustomerListQuery,
-  ): Promise<{ data: CustomerDto[] }> {
-    return { data: await this.credit.list(id, query) };
+  ): Promise<CustomerListDto> {
+    return this.credit.list(id, query);
   }
 
   @Post('units/:id/customers')

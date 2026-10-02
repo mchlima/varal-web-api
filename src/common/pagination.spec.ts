@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 
 import {
   decodeCursor,
+  decodeKeysetCursor,
   encodeCursor,
+  encodeKeysetCursor,
+  KeysetPaginationQuerySchema,
   pageArgs,
   PaginationQuerySchema,
   toPage,
@@ -51,5 +54,25 @@ describe('cursor pagination (spec 01, section 5)', () => {
     const rows = [{ id: 'a' }, { id: 'b' }, { id: 'c' }];
     expect(toPage(rows, 2)).toEqual({ data: rows.slice(0, 2), nextCursor: encodeCursor('b') });
     expect(toPage(rows, 3)).toEqual({ data: rows, nextCursor: null });
+  });
+});
+
+describe('keyset cursor (lists ordered by name or date)', () => {
+  it('round-trips the key and the id', () => {
+    const cursor = encodeKeysetCursor('Dona Márcia', ID);
+    expect(cursor).not.toContain(ID);
+    expect(decodeKeysetCursor(cursor)).toEqual({ key: 'Dona Márcia', id: ID });
+    expect(KeysetPaginationQuerySchema.parse({ cursor, limit: '5' })).toEqual({ cursor, limit: 5 });
+  });
+
+  it.each([
+    '',
+    encodeCursor(ID),
+    Buffer.from('k1:not json').toString('base64url'),
+    Buffer.from('k1:["a","not-a-uuid"]').toString('base64url'),
+    Buffer.from('k1:[1,"x"]').toString('base64url'),
+  ])('rejects a cursor it did not produce: %j', (cursor) => {
+    expect(decodeKeysetCursor(cursor)).toBeNull();
+    expect(KeysetPaginationQuerySchema.safeParse({ cursor }).success).toBe(false);
   });
 });

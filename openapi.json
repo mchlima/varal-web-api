@@ -2291,10 +2291,18 @@
               "$ref": "#/components/schemas/Customer"
             },
             "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor da próxima página; `null` na última.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "data"
+          "data",
+          "nextCursor"
         ],
         "type": "object"
       },
@@ -17337,6 +17345,30 @@
             }
           },
           {
+            "description": "Clientes por página (1 a 100, padrão 50), em ordem de nome; `nextCursor` traz a próxima página.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Clientes por página (1 a 100, padrão 50), em ordem de nome; `nextCursor` traz a próxima página.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "maxLength": 1000,
+              "type": "string"
+            }
+          },
+          {
             "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
             "in": "query",
             "name": "q",
@@ -17345,19 +17377,6 @@
               "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
               "maxLength": 60,
               "type": "string"
-            }
-          },
-          {
-            "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
-              "maximum": 100,
-              "minimum": 1,
-              "type": "integer"
             }
           }
         ],
@@ -17418,7 +17437,7 @@
             "panelSession": []
           }
         ],
-        "summary": "Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação (RN-06.02, CA-06.04)",
+        "summary": "Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação, paginada por cursor em ordem de nome (RN-06.02, CA-06.04)",
         "tags": [
           "credit"
         ]

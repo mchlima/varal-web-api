@@ -108,3 +108,47 @@ export function toPage<T extends { id: string }>(rows: T[], limit: number): Page
   const last = data.at(-1);
   return { data, nextCursor: rows.length > limit && last ? encodeCursor(last.id) : null };
 }
+
+const KEYSET_PREFIX = 'k1:';
+
+/**
+ * Opaque cursor of a list ordered by a key other than the id (e.g. a name or a date), with the id
+ * as tie-breaker: base64url of `k1:` + JSON `[key, id]`. Use when {@link encodeCursor} (id order)
+ * does not match the order of the list.
+ */
+export function encodeKeysetCursor(key: string, id: string): string {
+  return Buffer.from(`${KEYSET_PREFIX}${JSON.stringify([key, id])}`, 'utf8').toString('base64url');
+}
+
+/** `{ key, id }` inside a cursor of {@link encodeKeysetCursor}, or `null` when it is not one. */
+export function decodeKeysetCursor(cursor: string): { key: string; id: string } | null {
+  const decoded = Buffer.from(cursor, 'base64url').toString('utf8');
+  if (!decoded.startsWith(KEYSET_PREFIX)) {
+    return null;
+  }
+  try {
+    const value: unknown = JSON.parse(decoded.slice(KEYSET_PREFIX.length));
+    if (
+      Array.isArray(value) &&
+      value.length === 2 &&
+      typeof value[0] === 'string' &&
+      typeof value[1] === 'string' &&
+      uuidSchema.safeParse(value[1]).success
+    ) {
+      return { key: value[0], id: value[1].toLowerCase() };
+    }
+  } catch {
+    // Not JSON: not a cursor of ours.
+  }
+  return null;
+}
+
+/** `?limit=&cursor=` of a keyset list ({@link encodeKeysetCursor}); extend it with the filters. */
+export const KeysetPaginationQuerySchema = PaginationQuerySchema.extend({
+  cursor: z
+    .string()
+    .max(1000)
+    .refine((value) => decodeKeysetCursor(value) !== null, { message: 'Cursor inválido.' })
+    .optional()
+    .meta({ description: 'Valor de `nextCursor` da página anterior. Opaco: não monte à mão.' }),
+});
