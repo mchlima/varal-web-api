@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/mchlima/varal-web-api/compare/v0.5.0...v0.6.0) (2026-10-02)
+
+
+### Features
+
+* **reports:** relatório do turno, histórico, LGPD nas comandas e busca de clientes paginada (fase 7) ([#29](https://github.com/mchlima/varal-web-api/issues/29)) ([36fdfc5](https://github.com/mchlima/varal-web-api/commit/36fdfc5d0e9901a5d55c444345999bb18aa43faa))
+
 ## [0.5.0](https://github.com/mchlima/varal-web-api/compare/v0.4.0...v0.5.0) (2026-10-01)
 
 
