@@ -2291,10 +2291,18 @@
               "$ref": "#/components/schemas/Customer"
             },
             "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor da próxima página; `null` na última.",
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
-          "data"
+          "data",
+          "nextCursor"
         ],
         "type": "object"
       },
@@ -6211,6 +6219,592 @@
         ],
         "type": "object"
       },
+      "ReportActor": {
+        "additionalProperties": false,
+        "description": "Quem fez a ação, com o nome para exibir.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "description": "Nome do dono ou do colaborador; `null` para o sistema ou o suporte.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "type": {
+            "$ref": "#/components/schemas/ActorType"
+          }
+        },
+        "required": [
+          "type",
+          "id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "ReportCanceledItem": {
+        "additionalProperties": false,
+        "properties": {
+          "canceledAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "canceledBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "itemId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "productName": {
+            "type": "string"
+          },
+          "quantity": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabNumber": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "valueCents": {
+            "description": "Valor gravado do item cancelado.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasted": {
+            "description": "Perda (RN-04.27).",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "itemId",
+          "tabId",
+          "tabNumber",
+          "productName",
+          "quantity",
+          "valueCents",
+          "reason",
+          "canceledAt",
+          "canceledBy",
+          "wasted"
+        ],
+        "type": "object"
+      },
+      "ReportCanceledTab": {
+        "additionalProperties": false,
+        "properties": {
+          "canceledAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "canceledBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tabId",
+          "number",
+          "customerName",
+          "canceledAt",
+          "canceledBy"
+        ],
+        "type": "object"
+      },
+      "ReportCashRegister": {
+        "additionalProperties": false,
+        "properties": {
+          "cash": {
+            "$ref": "#/components/schemas/CashBreakdown"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActorRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closedByActor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportActor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "closingNote": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counts": {
+            "description": "Conferência gravada no fechamento (vazia enquanto aberto).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterCount"
+            },
+            "type": "array"
+          },
+          "creditSettlementsCents": {
+            "description": "Total de quitações de fiado recebidas neste caixa, em todas as formas (RN-05.22).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "differenceCents": {
+            "description": "Soma das diferenças por forma; 0 enquanto aberto (CA-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "expected": {
+            "description": "Esperado por forma, na ordem `cash`, `pix`, `credit_card`, `debit_card` (tabela da seção 5).",
+            "items": {
+              "$ref": "#/components/schemas/CashRegisterExpected"
+            },
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "openedBy": {
+            "$ref": "#/components/schemas/ActorRef",
+            "description": "Responsável: quem abriu (RN-05.17)."
+          },
+          "openingFloatCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "responsible": {
+            "$ref": "#/components/schemas/ReportActor",
+            "description": "Quem abriu o caixa (RN-05.17)."
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CashRegisterStatus"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "version": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "shiftId",
+          "unitId",
+          "name",
+          "status",
+          "openingFloatCents",
+          "openedBy",
+          "openedAt",
+          "closedBy",
+          "closedAt",
+          "closingNote",
+          "expected",
+          "cash",
+          "counts",
+          "creditSettlementsCents",
+          "version",
+          "responsible",
+          "closedByActor",
+          "differenceCents"
+        ],
+        "type": "object"
+      },
+      "ReportCreditTab": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "description": "Valor pendurado (RN-07.03).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "balanceCents": {
+            "description": "Saldo atual a receber.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "creditAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TabCustomer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "number": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TabStatus"
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tabId",
+          "number",
+          "customerName",
+          "customer",
+          "status",
+          "creditAt",
+          "amountCents",
+          "balanceCents"
+        ],
+        "type": "object"
+      },
+      "ReportPaymentMethodLine": {
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "salesCents": {
+            "description": "Pagamentos de comandas do turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "settlementsCents": {
+            "description": "Quitações de fiado recebidas no turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "totalCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "method",
+          "salesCents",
+          "settlementsCents",
+          "totalCents"
+        ],
+        "type": "object"
+      },
+      "ReportProductLine": {
+        "additionalProperties": false,
+        "properties": {
+          "modifiers": {
+            "description": "Modificadores com acréscimo escolhidos, maior valor primeiro.",
+            "items": {
+              "$ref": "#/components/schemas/ReportProductModifier"
+            },
+            "type": "array"
+          },
+          "productId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "productName": {
+            "description": "Nome gravado no item (RN-04.18).",
+            "type": "string"
+          },
+          "quantity": {
+            "description": "Unidades não canceladas (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "valueCents": {
+            "description": "Preço gravado + acréscimos, vezes a quantidade (RN-07.05), antes do desconto.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "productId",
+          "productName",
+          "quantity",
+          "valueCents",
+          "modifiers"
+        ],
+        "type": "object"
+      },
+      "ReportProductModifier": {
+        "additionalProperties": false,
+        "properties": {
+          "groupName": {
+            "type": "string"
+          },
+          "modifierName": {
+            "type": "string"
+          },
+          "priceDeltaCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "quantity": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "valueCents": {
+            "description": "Acréscimo × quantidade.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "groupName",
+          "modifierName",
+          "priceDeltaCents",
+          "quantity",
+          "valueCents"
+        ],
+        "type": "object"
+      },
+      "ReportSettlement": {
+        "additionalProperties": false,
+        "properties": {
+          "amountCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "customer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TabCustomer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "customerName": {
+            "type": "string"
+          },
+          "method": {
+            "$ref": "#/components/schemas/PaymentMethod"
+          },
+          "paymentId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "receivedBy": {
+            "$ref": "#/components/schemas/ReportActor"
+          },
+          "tabId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "tabNumber": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabShiftId": {
+            "description": "Turno da comanda quitada (pode ser outro).",
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "paymentId",
+          "tabId",
+          "tabNumber",
+          "tabShiftId",
+          "customerName",
+          "customer",
+          "method",
+          "amountCents",
+          "receivedAt",
+          "receivedBy"
+        ],
+        "type": "object"
+      },
+      "ReportStaffLine": {
+        "additionalProperties": false,
+        "description": "Linha \"Por colaborador\" (o dono também aparece).",
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/ReportActor"
+          },
+          "discountCount": {
+            "description": "Descontos em vigor dados por quem.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "discountsCents": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "itemsCanceled": {
+            "description": "Unidades de itens canceladas.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "ordersSent": {
+            "description": "Pedidos lançados.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedCents": {
+            "description": "Pagamentos não estornados recebidos no turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabsCanceled": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabsOpened": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "actor",
+          "tabsOpened",
+          "ordersSent",
+          "receivedCents",
+          "itemsCanceled",
+          "tabsCanceled",
+          "discountCount",
+          "discountsCents"
+        ],
+        "type": "object"
+      },
       "ResetPasswordRequestInput": {
         "properties": {
           "password": {
@@ -6586,6 +7180,274 @@
         ],
         "type": "object"
       },
+      "ShiftHistory": {
+        "additionalProperties": false,
+        "description": "Turnos do período, mais recentes primeiro (pela abertura), paginados por cursor, com os totais do período (spec 07, seção 5).",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ShiftHistoryRow"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "description": "Cursor da próxima página; `null` na última.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period": {
+            "additionalProperties": false,
+            "properties": {
+              "from": {
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "timeZone": {
+                "enum": [
+                  "America/Sao_Paulo"
+                ],
+                "type": "string"
+              },
+              "to": {
+                "description": "Inclusive.",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "from",
+              "to",
+              "timeZone"
+            ],
+            "type": "object"
+          },
+          "totals": {
+            "$ref": "#/components/schemas/ShiftHistoryTotals"
+          }
+        },
+        "required": [
+          "data",
+          "nextCursor",
+          "period",
+          "totals"
+        ],
+        "type": "object"
+      },
+      "ShiftHistoryRow": {
+        "additionalProperties": false,
+        "properties": {
+          "cashDifferenceCents": {
+            "description": "Diferença de caixa: soma de informado − esperado dos caixas fechados, em todas as formas (CA-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "date": {
+            "description": "Dia da abertura em America/Sao_Paulo.",
+            "format": "date",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+            "type": "string"
+          },
+          "discountsCents": {
+            "description": "Descontos das comandas que contam na venda.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "onCreditCents": {
+            "description": "Pendurado: saldo das comandas do turno no momento em que foram penduradas (RN-07.03).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "openedAt": {
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+            "type": "string"
+          },
+          "receivedCents": {
+            "description": "Recebido: pagamentos não estornados que entraram no turno, vendas e quitações (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSalesCents": {
+            "description": "Parte do recebido que é de comandas do turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSettlementsCents": {
+            "description": "Parte do recebido que é quitação de fiado, de qualquer turno (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "salesCents": {
+            "description": "Venda: total, após desconto, das comandas `paid`, `on_credit` e `settled` do turno (RN-07.01).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "shiftId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ShiftStatus"
+          },
+          "tabCount": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "type": {
+            "$ref": "#/components/schemas/ShiftType"
+          },
+          "unitId": {
+            "format": "uuid",
+            "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+            "type": "string"
+          },
+          "unitName": {
+            "type": "string"
+          },
+          "wasteCents": {
+            "description": "Perdas: valor dos itens cancelados marcados como perda (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasteQuantity": {
+            "description": "Unidades perdidas (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shiftId",
+          "unitId",
+          "unitName",
+          "type",
+          "status",
+          "date",
+          "openedAt",
+          "closedAt",
+          "tabCount",
+          "salesCents",
+          "receivedCents",
+          "receivedSalesCents",
+          "receivedSettlementsCents",
+          "onCreditCents",
+          "discountsCents",
+          "wasteCents",
+          "wasteQuantity",
+          "cashDifferenceCents"
+        ],
+        "type": "object"
+      },
+      "ShiftHistoryTotals": {
+        "additionalProperties": false,
+        "description": "Totais do período inteiro, não só da página.",
+        "properties": {
+          "cashDifferenceCents": {
+            "description": "Diferença de caixa: soma de informado − esperado dos caixas fechados, em todas as formas (CA-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "discountsCents": {
+            "description": "Descontos das comandas que contam na venda.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "onCreditCents": {
+            "description": "Pendurado: saldo das comandas do turno no momento em que foram penduradas (RN-07.03).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedCents": {
+            "description": "Recebido: pagamentos não estornados que entraram no turno, vendas e quitações (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSalesCents": {
+            "description": "Parte do recebido que é de comandas do turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSettlementsCents": {
+            "description": "Parte do recebido que é quitação de fiado, de qualquer turno (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "salesCents": {
+            "description": "Venda: total, após desconto, das comandas `paid`, `on_credit` e `settled` do turno (RN-07.01).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "shiftCount": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabCount": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasteCents": {
+            "description": "Perdas: valor dos itens cancelados marcados como perda (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasteQuantity": {
+            "description": "Unidades perdidas (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "shiftCount",
+          "tabCount",
+          "salesCents",
+          "receivedCents",
+          "receivedSalesCents",
+          "receivedSettlementsCents",
+          "onCreditCents",
+          "discountsCents",
+          "wasteCents",
+          "wasteQuantity",
+          "cashDifferenceCents"
+        ],
+        "type": "object"
+      },
       "ShiftPendingItems": {
         "additionalProperties": false,
         "description": "`details` do 409 `SHIFT_HAS_PENDING_ITEMS` ao fechar o turno (RN-04.07, CA-04.09).",
@@ -6692,6 +7554,396 @@
         "required": [
           "productId",
           "priceCents"
+        ],
+        "type": "object"
+      },
+      "ShiftReport": {
+        "additionalProperties": false,
+        "description": "Relatório do turno (spec 07, seção 4).",
+        "properties": {
+          "agreement": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ShiftReportAgreement"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Só no turno contratado."
+          },
+          "cancellations": {
+            "additionalProperties": false,
+            "properties": {
+              "items": {
+                "items": {
+                  "$ref": "#/components/schemas/ReportCanceledItem"
+                },
+                "type": "array"
+              },
+              "tabs": {
+                "items": {
+                  "$ref": "#/components/schemas/ReportCanceledTab"
+                },
+                "type": "array"
+              },
+              "wasteCents": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "wasteQuantity": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "wasteCents",
+              "wasteQuantity",
+              "items",
+              "tabs"
+            ],
+            "type": "object"
+          },
+          "cashRegisters": {
+            "items": {
+              "$ref": "#/components/schemas/ReportCashRegister"
+            },
+            "type": "array"
+          },
+          "credit": {
+            "additionalProperties": false,
+            "properties": {
+              "onCreditCents": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "settlements": {
+                "description": "Quitações não estornadas recebidas no turno.",
+                "items": {
+                  "$ref": "#/components/schemas/ReportSettlement"
+                },
+                "type": "array"
+              },
+              "settlementsCents": {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "tabs": {
+                "description": "Comandas do turno penduradas (hoje `on_credit` ou já `settled`).",
+                "items": {
+                  "$ref": "#/components/schemas/ReportCreditTab"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "onCreditCents",
+              "settlementsCents",
+              "tabs",
+              "settlements"
+            ],
+            "type": "object"
+          },
+          "partial": {
+            "description": "Turno aberto: o app mostra a faixa \"Turno em andamento — valores parciais\" (RN-07.06).",
+            "type": "boolean"
+          },
+          "paymentMethods": {
+            "description": "Sempre as quatro formas, na ordem `cash`, `pix`, `credit_card`, `debit_card`.",
+            "items": {
+              "$ref": "#/components/schemas/ReportPaymentMethodLine"
+            },
+            "type": "array"
+          },
+          "products": {
+            "description": "Por produto, maior valor primeiro.",
+            "items": {
+              "$ref": "#/components/schemas/ReportProductLine"
+            },
+            "type": "array"
+          },
+          "shift": {
+            "additionalProperties": false,
+            "properties": {
+              "closedAt": {
+                "anyOf": [
+                  {
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "closedBy": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ReportActor"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "date": {
+                "description": "Dia da abertura em America/Sao_Paulo.",
+                "format": "date",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+                "type": "string"
+              },
+              "id": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "openedAt": {
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$",
+                "type": "string"
+              },
+              "openedBy": {
+                "$ref": "#/components/schemas/ReportActor"
+              },
+              "status": {
+                "$ref": "#/components/schemas/ShiftStatus"
+              },
+              "type": {
+                "$ref": "#/components/schemas/ShiftType"
+              },
+              "unitId": {
+                "format": "uuid",
+                "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+                "type": "string"
+              },
+              "unitName": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "unitId",
+              "unitName",
+              "type",
+              "status",
+              "date",
+              "openedAt",
+              "openedBy",
+              "closedAt",
+              "closedBy"
+            ],
+            "type": "object"
+          },
+          "staff": {
+            "description": "Por colaborador, maior recebido primeiro.",
+            "items": {
+              "$ref": "#/components/schemas/ReportStaffLine"
+            },
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ShiftReportSummary"
+          },
+          "timeZone": {
+            "enum": [
+              "America/Sao_Paulo"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "shift",
+          "partial",
+          "timeZone",
+          "summary",
+          "products",
+          "paymentMethods",
+          "staff",
+          "cashRegisters",
+          "credit",
+          "cancellations",
+          "agreement"
+        ],
+        "type": "object"
+      },
+      "ShiftReportAgreement": {
+        "additionalProperties": false,
+        "description": "Acordo do turno contratado (RN-04.05).",
+        "properties": {
+          "agreedAmountCents": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "agreedQuantity": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "consumedCents": {
+            "description": "Valor consumido (= venda do turno).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "consumedQuantity": {
+            "description": "Unidades não canceladas das comandas que contam na venda.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "contractorName": {
+            "type": "string"
+          },
+          "limits": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modality": {
+            "$ref": "#/components/schemas/AgreementModality"
+          },
+          "notes": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "quantityDifference": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Quantidade combinada − consumida (CA-07.03); negativa se passou do combinado; `null` sem quantidade combinada."
+          }
+        },
+        "required": [
+          "contractorName",
+          "modality",
+          "agreedAmountCents",
+          "agreedQuantity",
+          "limits",
+          "notes",
+          "consumedQuantity",
+          "consumedCents",
+          "quantityDifference"
+        ],
+        "type": "object"
+      },
+      "ShiftReportSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "averageTicketCents": {
+            "description": "Venda ÷ comandas, arredondado para baixo; 0 sem comandas.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "canceledTabCount": {
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "cashDifferenceCents": {
+            "description": "Diferença de caixa: soma de informado − esperado dos caixas fechados, em todas as formas (CA-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "discountsCents": {
+            "description": "Descontos das comandas que contam na venda.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "onCreditCents": {
+            "description": "Pendurado: saldo das comandas do turno no momento em que foram penduradas (RN-07.03).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedCents": {
+            "description": "Recebido: pagamentos não estornados que entraram no turno, vendas e quitações (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSalesCents": {
+            "description": "Parte do recebido que é de comandas do turno.",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "receivedSettlementsCents": {
+            "description": "Parte do recebido que é quitação de fiado, de qualquer turno (RN-07.02).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "salesCents": {
+            "description": "Venda: total, após desconto, das comandas `paid`, `on_credit` e `settled` do turno (RN-07.01).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tabCount": {
+            "description": "Comandas que contam na venda (RN-07.01).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasteCents": {
+            "description": "Perdas: valor dos itens cancelados marcados como perda (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "wasteQuantity": {
+            "description": "Unidades perdidas (RN-07.04).",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "salesCents",
+          "receivedCents",
+          "receivedSalesCents",
+          "receivedSettlementsCents",
+          "onCreditCents",
+          "discountsCents",
+          "wasteCents",
+          "wasteQuantity",
+          "cashDifferenceCents",
+          "tabCount",
+          "canceledTabCount",
+          "averageTicketCents"
         ],
         "type": "object"
       },
@@ -14517,6 +15769,152 @@
         ]
       }
     },
+    "/api/v1/reports/shifts": {
+      "get": {
+        "operationId": "ReportsController_history",
+        "parameters": [
+          {
+            "description": "Itens por página (1 a 100, padrão 50).",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Itens por página (1 a 100, padrão 50).",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "maxLength": 1000,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Unidade; sem ela, todas da organização.",
+            "in": "query",
+            "name": "unitId",
+            "required": false,
+            "schema": {
+              "description": "Unidade; sem ela, todas da organização.",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "description": "Primeiro dia (AAAA-MM-DD, horário de Brasília). Padrão: 29 dias antes de `to`.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "description": "Último dia, inclusive (AAAA-MM-DD, horário de Brasília). Padrão: hoje.",
+              "format": "date",
+              "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/ShiftType"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftHistory"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`VALIDATION_FAILED`: datas, período de 1 a 366 dias ou cursor inválido."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Histórico de turnos por unidade (ou todas), período e tipo, mais recentes primeiro, com os totais do período (spec 07, seção 5; CA-07.04)",
+        "tags": [
+          "reports"
+        ]
+      }
+    },
     "/api/v1/shifts/{id}/cash-registers": {
       "get": {
         "operationId": "CashController_listRegisters",
@@ -14906,6 +16304,82 @@
         "summary": "Substitui a tabela de preços do turno aberto (RN-04.06)",
         "tags": [
           "operation"
+        ]
+      }
+    },
+    "/api/v1/shifts/{id}/report": {
+      "get": {
+        "operationId": "ReportsController_shiftReport",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ShiftReport"
+                }
+              }
+            },
+            "description": ""
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`UNAUTHENTICATED`: sem sessão do app ou sessão encerrada."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`FORBIDDEN`: só o dono pode usar esta rota."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "`NOT_FOUND`: não existe ou é de outra organização."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Erro no formato `ErrorResponse` (spec 01, seção 5)."
+          }
+        },
+        "security": [
+          {
+            "panelSession": []
+          }
+        ],
+        "summary": "Relatório do turno: resumo, por produto, por forma de pagamento, por colaborador, caixas, fiado, cancelamentos e perdas, acordo; parcial com o turno aberto (spec 07, seção 4; CA-07.01 a CA-07.05)",
+        "tags": [
+          "reports"
         ]
       }
     },
@@ -17337,6 +18811,30 @@
             }
           },
           {
+            "description": "Clientes por página (1 a 100, padrão 50), em ordem de nome; `nextCursor` traz a próxima página.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "description": "Clientes por página (1 a 100, padrão 50), em ordem de nome; `nextCursor` traz a próxima página.",
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "description": "Valor de `nextCursor` da página anterior. Opaco: não monte à mão.",
+              "maxLength": 1000,
+              "type": "string"
+            }
+          },
+          {
             "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
             "in": "query",
             "name": "q",
@@ -17345,19 +18843,6 @@
               "description": "Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.",
               "maxLength": 60,
               "type": "string"
-            }
-          },
-          {
-            "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "description": "Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.",
-              "maximum": 100,
-              "minimum": 1,
-              "type": "integer"
             }
           }
         ],
@@ -17418,7 +18903,7 @@
             "panelSession": []
           }
         ],
-        "summary": "Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação (RN-06.02, CA-06.04)",
+        "summary": "Busca clientes da unidade por nome, telefone, CPF ou referência, com os dados de identificação, paginada por cursor em ordem de nome (RN-06.02, CA-06.04)",
         "tags": [
           "credit"
         ]

@@ -564,6 +564,8 @@ model Shift {
 
   @@unique([organizationId, id])
   @@index([organizationId, unitId, openedAt])
+  /// Report history across the units (spec 07, section 5).
+  @@index([organizationId, openedAt])
   @@map("shifts")
 }
 
@@ -876,6 +878,8 @@ model Payment {
 
   @@index([organizationId, tabId])
   @@index([organizationId, cashRegisterId])
+  /// Received in a shift, sales and settlements (spec 07, RN-07.02).
+  @@index([organizationId, shiftId])
   @@map("payments")
 }
 
@@ -1231,6 +1235,7 @@ model Customer {
   tabs         Tab[]
 
   @@unique([organizationId, id])
-  @@index([organizationId, unitId])
+  /// Search in name order, paginated by (name, id) (spec 06, RN-06.02).
+  @@index([organizationId, unitId, name, id])
   @@map("customers")
 }

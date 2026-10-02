@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { KeysetPaginationQuerySchema, pageSchema } from '../common/pagination.js';
 import { ExpectedVersionSchema } from '../units/units.schemas.js';
 import { digitsOf, isValidCpf, isValidPhone } from './credit-rules.js';
 import { PaymentSchema, TabSummarySchema } from './operation.schemas.js';
@@ -112,22 +113,23 @@ export const UpdateCustomerRequestSchema = z
 
 export type UpdateCustomerRequest = z.infer<typeof UpdateCustomerRequestSchema>;
 
-/** `?q=`: unnamed (query schemas never carry `.meta({ id })`). */
-export const CustomerListQuerySchema = z.object({
+/** `?q=&limit=&cursor=`: unnamed (query schemas never carry `.meta({ id })`). */
+export const CustomerListQuerySchema = KeysetPaginationQuerySchema.extend({
   q: z.string().trim().max(60).optional().meta({
     description:
       'Busca por nome, telefone, CPF ou referência (RN-06.02); vazio lista todos. Removidos não aparecem.',
   }),
   limit: z.coerce.number().int().min(1).max(100).default(50).meta({
-    description: 'Quantidade máxima de resultados (1 a 100, padrão 50), em ordem de nome.',
+    description:
+      'Clientes por página (1 a 100, padrão 50), em ordem de nome; `nextCursor` traz a próxima página.',
   }),
 });
 
 export type CustomerListQuery = z.infer<typeof CustomerListQuerySchema>;
 
-export const CustomerListSchema = z
-  .object({ data: z.array(CustomerSchema) })
-  .meta({ id: 'CustomerList' });
+export const CustomerListSchema = pageSchema('CustomerList', CustomerSchema);
+
+export type CustomerListDto = z.infer<typeof CustomerListSchema>;
 
 // ------------------------------------------------------------------------------------------------
 // Put on credit (spec 06, section 4)

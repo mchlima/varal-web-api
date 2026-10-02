@@ -16,6 +16,7 @@ import { MenuModule } from './menu/menu.module.js';
 import { OperationModule } from './operation/operation.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { StaffModule } from './staff/staff.module.js';
 import { SupportAccessModule } from './support-access/support-access.module.js';
 import { UnitsModule } from './units/units.module.js';
@@ -37,6 +38,7 @@ import { UnitsModule } from './units/units.module.js';
     UnitsModule,
     MenuModule,
     OperationModule,
+    ReportsModule,
     StaffModule,
     HealthModule,
   ],

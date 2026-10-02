@@ -391,6 +391,47 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
     });
   });
 
+  describe('customer search pagination (spec 01, section 5)', () => {
+    it('pages the search in name order with limit and cursor', async () => {
+      const c = await crew('Paginação clientes');
+      for (const name of ['Carla', 'Ana', 'Bruno', 'Ana', 'Davi']) {
+        await createCustomer(c, { name });
+      }
+      const names: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const query: string = cursor === null ? '' : `&cursor=${encodeURIComponent(cursor)}`;
+        const page = await ok<{ data: CustomerDto[]; nextCursor: string | null }>(
+          'get',
+          `/units/${c.unitId}/customers?limit=2${query}`,
+          c.counter.auth,
+        );
+        expect(page.data.length).toBeLessThanOrEqual(2);
+        names.push(...page.data.map((row) => row.name));
+        cursor = page.nextCursor;
+        pages += 1;
+      } while (cursor !== null && pages < 10);
+      expect(names).toEqual(['Ana', 'Ana', 'Bruno', 'Carla', 'Davi']);
+      expect(pages).toBe(3);
+      const filtered = await ok<{ data: CustomerDto[]; nextCursor: string | null }>(
+        'get',
+        `/units/${c.unitId}/customers?q=an&limit=1`,
+        c.counter.auth,
+      );
+      expect(filtered.data.map((row) => row.name)).toEqual(['Ana']);
+      expect(filtered.nextCursor).not.toBeNull();
+      await fails(
+        'get',
+        `/units/${c.unitId}/customers?cursor=abc`,
+        c.counter.auth,
+        undefined,
+        400,
+        'VALIDATION_FAILED',
+      );
+    });
+  });
+
   describe('put on credit (section 4)', () => {
     it('CA-06.01, RN-06.05, RN-06.06: R$ 120,00 with R$ 20,00 paid is on credit with a balance of R$ 100,00', async () => {
       const c = await crew('Pendurar');
@@ -733,10 +774,15 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       });
       expect(removed.removedAt).not.toBeNull();
       const kept = await ok<TabDto>('get', `/tabs/${tab.id}`, c.counter.auth);
+      // RN-06.03 (LGPD): the name typed on the tab is replaced too, in the same transaction.
       expect(kept).toMatchObject({
         status: 'settled',
+        customerName: 'Cliente removido',
         customer: { id: customer.id, name: 'Cliente removido', removed: true },
       });
+      expect(JSON.stringify(kept)).not.toContain('Dona Marta');
+      const other = await billedTab(c, 1, 'Outra pessoa');
+      expect(other.customerName).toBe('Outra pessoa');
       expect((await search(c, 'Fulano')).data).toEqual([]);
       expect((await search(c, '')).data.map((row) => row.id)).not.toContain(customer.id);
       // The phone is free again in the unit.
