@@ -2,40 +2,38 @@ import { z } from 'zod';
 
 import {
   AgreementModality,
+  ContractedEventStatus,
   DiscountType,
   OrderStatus,
   PaymentMethod,
-  ShiftStatus,
-  ShiftType,
   TabMode,
   TabStatus,
 } from '../generated/prisma/enums.js';
 import type { TabStatus as TabStatusValue } from '../generated/prisma/enums.js';
 import { ActorTypeSchema } from '../openapi/enum-schemas.js';
-import { ExpectedVersionSchema, WorkflowStageSchema } from '../units/units.schemas.js';
+import { WorkflowStageSchema } from '../units/units.schemas.js';
 import { ORDER_ITEM_REJECTION_REASONS } from './order-rules.js';
 
 /*
- * Contracts of the operation (spec 04): shifts, tabs, orders, items and the station queue.
- * Money in integer cents (`…Cents`); dates in ISO 8601 (UTC).
+ * Contracts of the operation (spec 04): tabs, orders, items, payments and the station queue (KDS).
+ * Money in integer cents (`…Cents`); instants in ISO 8601 (UTC); days of operation (`…Date`) as
+ * `AAAA-MM-DD` in America/Sao_Paulo (RN-04.29).
  */
 
 // ------------------------------------------------------------------------------------------------
 // Enums
 // ------------------------------------------------------------------------------------------------
 
-export const ShiftTypeSchema = z.enum(ShiftType).meta({
-  id: 'ShiftType',
-  description:
-    '`direct_sale`: venda direta; `contracted`: turno contratado, com acordo (RN-04.04). Não muda depois da abertura.',
-});
-
-export const ShiftStatusSchema = z.enum(ShiftStatus).meta({ id: 'ShiftStatus' });
-
 export const AgreementModalitySchema = z.enum(AgreementModality).meta({
   id: 'AgreementModality',
   description:
     '`fixed_fee`: valor fixo; `per_quantity`: por quantidade; `consumption_billed`: o contratante paga o consumo no final; `other` (RN-04.05).',
+});
+
+export const ContractedEventStatusSchema = z.enum(ContractedEventStatus).meta({
+  id: 'ContractedEventStatus',
+  description:
+    'Situação do evento contratado (RN-04.34): `scheduled` (agendado) → `in_progress` (em andamento) → `finished` (encerrado); `scheduled` → `canceled`.',
 });
 
 export const TabModeSchema = z.enum(TabMode).meta({
@@ -81,8 +79,6 @@ export const ActorRefSchema = z
   .object({ type: ActorTypeSchema, id: z.uuid().nullable() })
   .meta({ id: 'ActorRef', description: 'Quem fez a ação (dono ou colaborador).' });
 
-const CentsSchema = z.int().min(0).max(100_000_000);
-
 const ReasonSchema = z
   .string()
   .trim()
@@ -99,134 +95,9 @@ const TabVersionSchema = z.int().min(0).optional().meta({
     'Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.',
 });
 
-// ------------------------------------------------------------------------------------------------
-// Shifts (spec 04, section 3)
-// ------------------------------------------------------------------------------------------------
-
-export const ShiftAgreementSchema = z
-  .object({
-    contractorName: z.string(),
-    modality: AgreementModalitySchema,
-    agreedAmountCents: z.int().nullable(),
-    agreedQuantity: z.int().nullable(),
-    limits: z.string().nullable(),
-    notes: z.string().nullable(),
-  })
-  .meta({ id: 'ShiftAgreement', description: 'Acordo do turno contratado (RN-04.05).' });
-
-export const ShiftPriceSchema = z
-  .object({ productId: z.uuid(), priceCents: CentsSchema })
-  .meta({ id: 'ShiftPrice', description: 'Preço de um produto só neste turno (RN-04.06).' });
-
-export const ShiftSchema = z
-  .object({
-    id: z.uuid(),
-    unitId: z.uuid(),
-    type: ShiftTypeSchema,
-    status: ShiftStatusSchema,
-    openedAt: z.iso.datetime(),
-    openedBy: ActorRefSchema,
-    closedAt: z.iso.datetime().nullable(),
-    closedBy: ActorRefSchema.nullable(),
-    agreement: ShiftAgreementSchema.nullable().meta({
-      description: 'Só no turno contratado.',
-    }),
-    prices: z.array(ShiftPriceSchema).meta({
-      description:
-        'Tabela de preços do turno; produtos fora dela usam o preço do cardápio (RN-04.06).',
-    }),
-    version: z.int(),
-  })
-  .meta({ id: 'Shift' });
-
-export type ShiftDto = z.infer<typeof ShiftSchema>;
-
-export const CurrentShiftSchema = z
-  .object({ shift: ShiftSchema.nullable().meta({ description: '`null` sem turno aberto.' }) })
-  .meta({ id: 'CurrentShift' });
-
-const AgreementInputSchema = z.object({
-  contractorName: z
-    .string()
-    .trim()
-    .min(1, { message: 'Informe o nome do contratante.' })
-    .max(80, { message: 'Use no máximo 80 caracteres.' }),
-  modality: AgreementModalitySchema,
-  agreedAmountCents: CentsSchema.nullable().optional(),
-  agreedQuantity: z.int().min(1).max(1_000_000).nullable().optional(),
-  limits: z.string().trim().max(200, { message: 'Use no máximo 200 caracteres.' }).nullish(),
-  notes: z.string().trim().max(500, { message: 'Use no máximo 500 caracteres.' }).nullish(),
+export const PlainDateSchema = z.iso.date().meta({
+  description: 'Dia de operação (AAAA-MM-DD, America/Sao_Paulo; RN-04.29).',
 });
-
-const PricesInputSchema = z
-  .array(ShiftPriceSchema)
-  .max(500)
-  .refine(
-    (prices) =>
-      new Set(prices.map((price) => price.productId.toLowerCase())).size === prices.length,
-    {
-      message: 'Cada produto aparece uma vez só na tabela de preços.',
-    },
-  );
-
-export const OpenShiftRequestSchema = z
-  .object({
-    type: ShiftTypeSchema,
-    agreement: AgreementInputSchema.nullish().meta({
-      description: 'Obrigatório no turno contratado; não vale na venda direta (RN-04.05).',
-    }),
-    prices: PricesInputSchema.default([]),
-  })
-  .superRefine((value, ctx) => {
-    if (value.type === 'contracted' && !value.agreement) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['agreement'],
-        message: 'O turno contratado precisa do acordo.',
-      });
-    }
-    if (value.type === 'direct_sale' && value.agreement) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['agreement'],
-        message: 'A venda direta não tem acordo.',
-      });
-    }
-  })
-  .meta({ id: 'OpenShiftRequest' });
-
-export type OpenShiftRequest = z.infer<typeof OpenShiftRequestSchema>;
-
-export const PutShiftPricesRequestSchema = z
-  .object({
-    prices: PricesInputSchema.meta({ description: 'A tabela inteira; substitui a anterior.' }),
-    version: ExpectedVersionSchema.optional(),
-  })
-  .meta({ id: 'PutShiftPricesRequest' });
-
-export const ShiftPendingTabSchema = z
-  .object({
-    id: z.uuid(),
-    number: z.int(),
-    customerName: z.string(),
-    status: TabStatusSchema,
-  })
-  .meta({ id: 'ShiftPendingTab' });
-
-export const ShiftPendingItemsSchema = z
-  .object({
-    tabs: z.array(ShiftPendingTabSchema).meta({ description: 'Comandas em `open` ou `closing`.' }),
-    cashRegisters: z
-      .array(z.object({ id: z.uuid(), name: z.string() }))
-      .meta({ description: 'Caixas do turno ainda abertos (spec 05).' }),
-  })
-  .meta({
-    id: 'ShiftPendingItems',
-    description:
-      '`details` do 409 `SHIFT_HAS_PENDING_ITEMS` ao fechar o turno (RN-04.07, CA-04.09).',
-  });
-
-export type ShiftPendingItems = z.infer<typeof ShiftPendingItemsSchema>;
 
 // ------------------------------------------------------------------------------------------------
 // Orders and items (spec 04, section 5)
@@ -253,7 +124,11 @@ export const OrderItemSchema = z
     productId: z.uuid(),
     productName: z.string().meta({ description: 'Cópia do nome no momento da venda (RN-04.18).' }),
     unitPriceCents: z.int().meta({
-      description: 'Preço unitário vigente no envio: do turno ou do cardápio (RN-04.18).',
+      description:
+        'Preço unitário no envio: o da tabela efetiva da unidade, ou o preço normal quando o produto não tem preço nela (RN-04.18).',
+    }),
+    priceListId: z.uuid().nullable().meta({
+      description: 'Tabela de preço cujo preço foi usado (RN-04.18); `null` = preço normal.',
     }),
     quantity: z.int(),
     note: z.string().nullable(),
@@ -270,12 +145,19 @@ export const OrderItemSchema = z
     stageIsFinal: z.boolean(),
     stageEnteredAt: z.iso.datetime(),
     sentAt: z.iso.datetime().meta({ description: 'Envio do pedido.' }),
+    attentionAt: z.iso.datetime().nullable().meta({
+      description:
+        'Quando o item entra em atenção: envio + `attentionAfterMinutes` da estação de preparo (RN-04.23; no balcão vale a estação de preparo). `null` na etapa final ou cancelado.',
+    }),
     lateAt: z.iso.datetime().nullable().meta({
       description:
-        'Quando o item passa a estar atrasado: envio + `lateAfterMinutes` da unidade (RN-04.23). `null` na etapa final ou cancelado.',
+        'Quando o item passa a estar atrasado: envio + `lateAfterMinutes` da estação de preparo (RN-04.23). `null` na etapa final ou cancelado.',
     }),
     isLate: z.boolean().meta({ description: 'Atrasado no momento da resposta (CA-04.11).' }),
     canceledAt: z.iso.datetime().nullable(),
+    canceledBusinessDate: PlainDateSchema.nullable().meta({
+      description: 'Dia de operação do cancelamento (RN-04.27, RN-04.30).',
+    }),
     canceledBy: ActorRefSchema.nullable(),
     cancelReason: z.string().nullable(),
     wasted: z
@@ -294,11 +176,12 @@ export const OrderSchema = z
   .object({
     id: z.uuid(),
     tabId: z.uuid(),
-    shiftId: z.uuid(),
     unitId: z.uuid(),
     tabNumber: z.int(),
     customerName: z.string(),
-    numberInTab: z.int(),
+    numberInTab: z.int().meta({
+      description: 'Número do pedido na comanda; a partir do 2 é um "Adicional" (RN-04.44).',
+    }),
     status: OrderStatusSchema,
     createdBy: ActorRefSchema,
     sentAt: z.iso.datetime(),
@@ -408,9 +291,22 @@ export const TabCustomerSchema = z
 export const TabSummarySchema = z
   .object({
     id: z.uuid(),
-    shiftId: z.uuid(),
     unitId: z.uuid(),
-    number: z.int(),
+    number: z.int().meta({
+      description:
+        'Número no dia de operação, nunca repetido entre as comandas em aberto (RN-04.09).',
+    }),
+    businessDate: PlainDateSchema.meta({
+      description:
+        'Dia de operação em que foi aberta (RN-04.30); de um dia anterior, o balcão mostra "desde dd/mm" (RN-04.10).',
+    }),
+    closedBusinessDate: PlainDateSchema.nullable().meta({
+      description:
+        'Dia de operação em que saiu de `open`/`closing` (RN-04.38): o dia da venda (spec 07).',
+    }),
+    eventId: z.uuid().nullable().meta({
+      description: 'Evento em andamento quando a comanda foi aberta (RN-04.36).',
+    }),
     customerName: z.string(),
     mode: TabModeSchema,
     status: TabStatusSchema,
@@ -424,7 +320,9 @@ export const TabSummarySchema = z
       description:
         'Unidades na etapa anterior à final (prontas para entregar): o sinal do cartão no varal.',
     }),
-    lateItemCount: z.int().meta({ description: 'Unidades atrasadas (RN-04.23).' }),
+    lateItemCount: z.int().meta({
+      description: 'Unidades atrasadas pelo limite da estação de preparo (RN-04.23).',
+    }),
     discountReason: z.string().nullable().meta({ description: 'Motivo do desconto (RN-05.01).' }),
     paidCents: z.int().meta({
       description: 'Soma dos pagamentos não estornados (RN-05.07).',
@@ -458,8 +356,11 @@ export const PaymentSchema = z
     tabId: z.uuid(),
     tabNumber: z.int(),
     customerName: z.string(),
-    shiftId: z.uuid().meta({ description: 'Turno em que o dinheiro entrou.' }),
-    cashRegisterId: z.uuid(),
+    cashRegisterSessionId: z.uuid().meta({
+      description: 'Abertura de caixa em que o dinheiro entrou (RN-05.05).',
+    }),
+    cashRegisterId: z.uuid().meta({ description: 'Caixa cadastrado dessa abertura.' }),
+    cashRegisterName: z.string(),
     method: PaymentMethodSchema,
     amountCents: z.int().meta({ description: 'Valor aplicado à comanda (RN-05.09).' }),
     tenderedCents: z.int().nullable().meta({
@@ -542,32 +443,104 @@ export function tabStatusesOf(query: { status?: string | undefined }): TabStatus
 export type TabListQuery = z.infer<typeof TabListQuerySchema>;
 
 // ------------------------------------------------------------------------------------------------
-// Station queue (spec 04, section 8.2)
+// Station queue: one order, one card (spec 04, sections 5.2 and 8.2)
 // ------------------------------------------------------------------------------------------------
+
+export const STATION_LINE_STATES = ['pending', 'done', 'canceled'] as const;
+
+export const StationLineStateSchema = z.enum(STATION_LINE_STATES).meta({
+  id: 'StationLineState',
+  description:
+    'Linha do cartão (RN-04.41, RN-04.45): `pending` está nesta estação; `done` passou por ela e saiu (riscada, com confirmação); `canceled` foi cancelada no cartão (riscada, com o motivo).',
+});
+
+export const StationLineSchema = OrderItemSchema.extend({
+  state: StationLineStateSchema,
+}).meta({ id: 'StationLine' });
+
+export const StationOrderSchema = z
+  .object({
+    orderId: z.uuid(),
+    tabId: z.uuid(),
+    tabNumber: z.int(),
+    customerName: z.string(),
+    tabMode: TabModeSchema.meta({ description: 'O cartão mostra "Paga antes" quando for.' }),
+    numberInTab: z.int(),
+    isAdditional: z.boolean().meta({
+      description:
+        'Pedido 2 em diante da comanda: o cartão mostra "Adicional · pedido N" (RN-04.44).',
+    }),
+    sentAt: z.iso.datetime(),
+    attentionAt: z.iso.datetime().meta({
+      description: 'Envio + limite de atenção da estação (RN-04.46).',
+    }),
+    lateAt: z.iso
+      .datetime()
+      .meta({ description: 'Envio + limite de atraso da estação (RN-04.46).' }),
+    lines: z.array(StationLineSchema).meta({
+      description:
+        'Linhas do pedido que são desta estação, na ordem do pedido: pendentes, feitas e canceladas (RN-04.40 a RN-04.45).',
+    }),
+    otherStationsQuantity: z.int().meta({
+      description:
+        'Unidades ativas do pedido que estão em etapas de outras estações: "+ N itens em outra estação" (RN-04.43).',
+    }),
+  })
+  .meta({ id: 'StationOrder', description: 'Um cartão da estação: um pedido (RN-04.40).' });
+
+export type StationOrderDto = z.infer<typeof StationOrderSchema>;
 
 export const StationQueueSchema = z
   .object({
     stationId: z.uuid(),
     unitId: z.uuid(),
-    lateAfterMinutes: z.int(),
+    attentionAfterMinutes: z
+      .int()
+      .meta({ description: 'Limite de atenção da estação (RN-03.25).' }),
+    lateAfterMinutes: z.int().meta({ description: 'Limite de atraso da estação (RN-03.25).' }),
     stages: z.array(WorkflowStageSchema).meta({
       description:
         'Fluxo da unidade em ordem, para o nome do botão de avançar ("Começar", "Pronto") e o filtro por etapa.',
     }),
-    items: z.array(OrderItemSchema).meta({
+    orders: z.array(StationOrderSchema).meta({
       description:
-        'Itens nesta estação, do pedido mais antigo para o mais novo; itens do mesmo pedido juntos.',
+        'Cartões com pelo menos uma linha pendente nesta estação, do pedido mais antigo para o mais novo (RN-04.40, RN-04.42).',
     }),
   })
   .meta({ id: 'StationQueue' });
 
 export type StationQueueDto = z.infer<typeof StationQueueSchema>;
 
+export const AdvanceOrderRequestSchema = z
+  .object({
+    stationId: z.uuid().meta({ description: 'Estação do cartão.' }),
+    stageId: z.uuid().optional().meta({
+      description:
+        'Com o filtro por etapa: só as linhas nesta etapa. Sem ele, todas as linhas do pedido na estação.',
+    }),
+    items: z
+      .array(z.object({ id: z.uuid(), version: ItemVersionSchema }))
+      .min(1)
+      .max(100)
+      .meta({
+        description:
+          'Todas as linhas do pedido que estão na estação (e na etapa), com a versão que o aparelho tem. Se alguma mudou ou faltou, nada é aplicado (RN-04.39).',
+      }),
+  })
+  .meta({ id: 'AdvanceOrderRequest' });
+
+export const AdvanceOrderResultSchema = z
+  .object({
+    orderId: z.uuid(),
+    items: z.array(OrderItemSchema).meta({ description: 'As linhas na etapa nova.' }),
+  })
+  .meta({ id: 'AdvanceOrderResult' });
+
+export type AdvanceOrderResultDto = z.infer<typeof AdvanceOrderResultSchema>;
+
 /** Named schemas that no route references directly (error details). */
 export const operationContractSchemas: readonly z.ZodType[] = [
-  ShiftStatusSchema,
   OrderStatusSchema,
   OrderItemRejectionReasonSchema,
   OrderRejectedDetailsSchema,
-  ShiftPendingItemsSchema,
 ];

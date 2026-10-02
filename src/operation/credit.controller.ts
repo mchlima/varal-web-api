@@ -158,9 +158,7 @@ export class CreditController {
   @ApiOkResponse({ standardSchema: TabSchema })
   @NotFoundResponse()
   @Forbidden(COUNTER)
-  @Conflict(
-    '`TAB_NOT_CLOSING` (CA-06.02), `TAB_CLOSED`, `TAB_NOTHING_TO_PAY`, `TAB_CHANGED` ou `SHIFT_CLOSED`.',
-  )
+  @Conflict('`TAB_NOT_CLOSING` (CA-06.02), `TAB_CLOSED`, `TAB_NOTHING_TO_PAY` ou `TAB_CHANGED`.')
   @BadRequest('`INVALID_CUSTOMER`, `CUSTOMER_REQUIRED` ou `VALIDATION_FAILED`.')
   putOnCredit(
     @Param('id', IdPipe) id: string,

@@ -75,6 +75,8 @@ describe.skipIf(!databaseUrl)('authentication (spec 01, section 7)', () => {
           name: 'Cozinha',
           kind: 'queue',
           sortOrder: 1,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
         },
       });
       await platform.staffUnitPermission.create({

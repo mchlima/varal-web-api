@@ -1,19 +1,25 @@
 import { z } from 'zod';
 
-import { CashMovementType, CashRegisterStatus, DiscountType } from '../generated/prisma/enums.js';
-import { ExpectedVersionSchema } from '../units/units.schemas.js';
+import {
+  CashMovementType,
+  CashRegisterSessionStatus,
+  DiscountType,
+} from '../generated/prisma/enums.js';
+import { ExpectedVersionSchema, SortOrderSchema } from '../units/units.schemas.js';
 import {
   ActorRefSchema,
   CreateOrderRequestSchema,
   CreateTabRequestSchema,
   PaymentMethodSchema,
   PaymentSchema,
+  PlainDateSchema,
   TabSchema,
+  TabStatusSchema,
 } from './operation.schemas.js';
 
 /*
- * Contracts of spec 05: discounts, payments, "paga antes" and cash registers. Money in integer
- * cents (`…Cents`); dates in ISO 8601 (UTC).
+ * Contracts of spec 05: discounts, payments, "paga antes", cash registers of the unit and their
+ * sessions (aberturas de caixa). Money in integer cents (`…Cents`); dates in ISO 8601 (UTC).
  */
 
 const MAX_CENTS = 100_000_000;
@@ -34,9 +40,10 @@ const TabVersionSchema = z.int().min(0).optional().meta({
     'Versão da comanda que o aparelho tem (opcional). Diferente da atual: 409 `TAB_CHANGED` com `details.currentVersion`.',
 });
 
-export const CashRegisterStatusSchema = z.enum(CashRegisterStatus).meta({
-  id: 'CashRegisterStatus',
-  description: '`open` recebe pagamentos e movimentos; `closed` não volta a abrir (RN-05.21).',
+export const CashRegisterSessionStatusSchema = z.enum(CashRegisterSessionStatus).meta({
+  id: 'CashRegisterSessionStatus',
+  description:
+    'Situação da abertura de caixa: `open` recebe pagamentos e movimentos; `closed` não volta a abrir (RN-05.21): abre-se o caixa de novo, numa abertura nova.',
 });
 
 export const CashMovementTypeSchema = z.enum(CashMovementType).meta({
@@ -129,7 +136,7 @@ function checkPaymentInput(
 
 const CashRegisterChoiceSchema = z.uuid().optional().meta({
   description:
-    'Caixa que recebe (RN-05.05). Opcional com um único caixa aberto no turno; obrigatório com mais de um (`CASH_REGISTER_REQUIRED`).',
+    'Caixa cadastrado que recebe; o pagamento entra na abertura em andamento dele (RN-05.05). Opcional com um único caixa aberto na unidade; obrigatório com mais de um (`CASH_REGISTER_REQUIRED`).',
 });
 
 export const CreatePaymentRequestSchema = z
@@ -183,12 +190,12 @@ export const PayFirstRequestSchema = z
 export type PayFirstRequest = z.infer<typeof PayFirstRequestSchema>;
 
 // ------------------------------------------------------------------------------------------------
-// Cash registers (spec 05, section 5)
+// Cash register sessions (spec 05, sections 5.2 to 5.4)
 // ------------------------------------------------------------------------------------------------
 
 const CreditSettlementsCentsSchema = z.int().meta({
   description:
-    'Quitações de fiado recebidas neste caixa (não estornadas), separadas do recebido das comandas do turno (RN-05.22). Já estão somadas no esperado.',
+    'Quitações de fiado recebidas nesta abertura (não estornadas), separadas das vendas (RN-05.22). Já estão somadas no esperado.',
 });
 
 export const ExpectedByMethodSchema = z
@@ -197,7 +204,7 @@ export const ExpectedByMethodSchema = z
     expectedCents: z.int(),
     salesCents: z.int().meta({
       description:
-        'Pagamentos das comandas do turno nesta forma (sem quitações de fiado, sem fundo e movimentos).',
+        'Pagamentos de comandas nesta forma (sem quitações de fiado, sem fundo e movimentos).',
     }),
     creditSettlementsCents: CreditSettlementsCentsSchema,
   })
@@ -228,16 +235,24 @@ export const CashRegisterCountSchema = z
   })
   .meta({ id: 'CashRegisterCount' });
 
-export const CashRegisterSchema = z
+export const CashRegisterSessionSchema = z
   .object({
     id: z.uuid(),
-    shiftId: z.uuid(),
+    cashRegisterId: z.uuid(),
+    name: z.string().meta({ description: 'Nome do caixa cadastrado.' }),
     unitId: z.uuid(),
-    name: z.string(),
-    status: CashRegisterStatusSchema,
+    businessDate: PlainDateSchema.meta({
+      description: 'Dia de operação da abertura (RN-05.25).',
+    }),
+    status: CashRegisterSessionStatusSchema,
     openingFloatCents: z.int(),
-    openedBy: ActorRefSchema.meta({ description: 'Responsável: quem abriu (RN-05.17).' }),
+    openedBy: ActorRefSchema.meta({ description: 'Responsável: quem abriu (RN-05.23).' }),
+    openedByName: z.string().nullable().meta({ description: 'Nome do responsável.' }),
     openedAt: z.iso.datetime(),
+    openSinceEarlierDay: z.boolean().meta({
+      description:
+        'Aberta e de um dia anterior a hoje: "Caixa 1 aberto desde ontem, 17:02" (RN-05.26).',
+    }),
     closedBy: ActorRefSchema.nullable(),
     closedAt: z.iso.datetime().nullable(),
     closingNote: z.string().nullable(),
@@ -247,26 +262,38 @@ export const CashRegisterSchema = z
     }),
     cash: CashBreakdownSchema,
     counts: z.array(CashRegisterCountSchema).meta({
-      description: 'Conferência gravada no fechamento (vazia enquanto aberto).',
+      description: 'Conferência gravada no fechamento (vazia enquanto aberta).',
     }),
     creditSettlementsCents: z.int().meta({
       description:
-        'Total de quitações de fiado recebidas neste caixa, em todas as formas (RN-05.22).',
+        'Total de quitações de fiado recebidas nesta abertura, em todas as formas (RN-05.22).',
+    }),
+    receivedCents: z.int().meta({
+      description: 'Pagamentos não estornados desta abertura, vendas e quitações.',
+    }),
+    differenceCents: z.int().meta({
+      description: 'Soma das diferenças por forma; 0 enquanto aberta (RN-05.20).',
+    }),
+    pendingTabsCount: z.int().nullable().meta({
+      description:
+        'Comandas `open`/`closing` da unidade no fechamento (RN-05.28); `null` enquanto aberta.',
+    }),
+    pendingTabsTotalCents: z.int().nullable().meta({
+      description: 'Valor total dessas comandas no fechamento (RN-05.28).',
     }),
     version: z.int(),
   })
-  .meta({ id: 'CashRegister', description: 'Caixa do turno com o esperado por forma.' });
+  .meta({
+    id: 'CashRegisterSession',
+    description: 'Abertura de caixa: de abrir (fundo de troco) até fechar (conferência).',
+  });
 
-export type CashRegisterDto = z.infer<typeof CashRegisterSchema>;
-
-export const CashRegisterListSchema = z
-  .object({ data: z.array(CashRegisterSchema) })
-  .meta({ id: 'CashRegisterList' });
+export type CashRegisterSessionDto = z.infer<typeof CashRegisterSessionSchema>;
 
 export const CashMovementSchema = z
   .object({
     id: z.uuid(),
-    cashRegisterId: z.uuid(),
+    cashRegisterSessionId: z.uuid(),
     type: CashMovementTypeSchema,
     amountCents: z.int(),
     reason: z.string(),
@@ -277,26 +304,84 @@ export const CashMovementSchema = z
 
 export type CashMovementDto = z.infer<typeof CashMovementSchema>;
 
-export const CashRegisterDetailSchema = CashRegisterSchema.extend({
+export const CashRegisterSessionDetailSchema = CashRegisterSessionSchema.extend({
   movements: z.array(CashMovementSchema),
   payments: z.array(PaymentSchema).meta({
-    description: 'Pagamentos recebidos neste caixa, inclusive os estornados.',
+    description: 'Pagamentos recebidos nesta abertura, inclusive os estornados.',
   }),
-}).meta({ id: 'CashRegisterDetail' });
+}).meta({ id: 'CashRegisterSessionDetail' });
 
-export type CashRegisterDetailDto = z.infer<typeof CashRegisterDetailSchema>;
+export type CashRegisterSessionDetailDto = z.infer<typeof CashRegisterSessionDetailSchema>;
+
+// ------------------------------------------------------------------------------------------------
+// Cash registers of the unit (spec 05, section 5.1)
+// ------------------------------------------------------------------------------------------------
+
+export const CashRegisterSchema = z
+  .object({
+    id: z.uuid(),
+    unitId: z.uuid(),
+    name: z.string(),
+    sortOrder: z.int(),
+    active: z.boolean(),
+    session: CashRegisterSessionSchema.nullable().meta({
+      description:
+        'A abertura em andamento ou, com o caixa fechado, a última fechada (`null` se nunca foi aberto).',
+    }),
+    suggestedOpeningFloatCents: z.int().meta({
+      description:
+        'Fundo de troco sugerido: o da abertura anterior deste caixa (RN-05.23); 0 sem ela.',
+    }),
+    version: z.int().meta({
+      description: 'Versão do caixa, incrementada a cada mudança dele ou das aberturas.',
+    }),
+  })
+  .meta({
+    id: 'CashRegister',
+    description: 'Caixa cadastrado da unidade (RN-05.17) com a abertura atual ou a última.',
+  });
+
+export type CashRegisterDto = z.infer<typeof CashRegisterSchema>;
+
+export const CashRegisterListSchema = z
+  .object({ data: z.array(CashRegisterSchema) })
+  .meta({ id: 'CashRegisterList' });
+
+const RegisterNameSchema = z
+  .string()
+  .trim()
+  .min(1, { message: 'Informe o nome do caixa.' })
+  .max(40, { message: 'Use no máximo 40 caracteres.' });
+
+export const CreateCashRegisterRequestSchema = z
+  .object({
+    name: RegisterNameSchema.meta({
+      description: 'De 1 a 40 caracteres, único na unidade (RN-05.17).',
+    }),
+    sortOrder: SortOrderSchema.optional(),
+  })
+  .meta({ id: 'CreateCashRegisterRequest' });
+
+export const UpdateCashRegisterRequestSchema = z
+  .object({
+    name: RegisterNameSchema.optional(),
+    sortOrder: SortOrderSchema.optional(),
+    active: z.boolean().optional().meta({
+      description:
+        'Caixa aberto não é desativado (`CASH_REGISTER_OPEN`), nem o último ativo (`LAST_ACTIVE_CASH_REGISTER`), RN-05.27, CA-05.14.',
+    }),
+    version: ExpectedVersionSchema.optional(),
+  })
+  .meta({ id: 'UpdateCashRegisterRequest' });
 
 export const OpenCashRegisterRequestSchema = z
   .object({
-    name: z
-      .string()
-      .trim()
-      .min(1, { message: 'Informe o nome do caixa.' })
-      .max(40, { message: 'Use no máximo 40 caracteres.' })
-      .optional()
-      .meta({ description: 'Padrão: "Caixa 1", "Caixa 2"… (RN-05.17).' }),
     openingFloatCents: z.int().min(0).max(MAX_CENTS).meta({
-      description: 'Fundo de troco em dinheiro, zero ou mais (RN-05.17).',
+      description: 'Fundo de troco em dinheiro, zero ou mais (RN-05.23).',
+    }),
+    startEventId: z.uuid().optional().meta({
+      description:
+        'Inicia junto o evento agendado da unidade ("Hoje tem o evento… Iniciar junto?", RN-04.35).',
     }),
   })
   .meta({ id: 'OpenCashRegisterRequest' });
@@ -309,6 +394,42 @@ export const CashMovementRequestSchema = z
     version: ExpectedVersionSchema.optional(),
   })
   .meta({ id: 'CashMovementRequest' });
+
+export const PendingTabSchema = z
+  .object({
+    id: z.uuid(),
+    number: z.int(),
+    customerName: z.string(),
+    status: TabStatusSchema,
+    totalCents: z.int(),
+    businessDate: PlainDateSchema.meta({ description: 'Desde quando (dia de operação).' }),
+    openedAt: z.iso.datetime(),
+  })
+  .meta({ id: 'PendingTab', description: 'Comanda que segue aberta (RN-05.28).' });
+
+export const ClosePreviewSchema = z
+  .object({
+    session: CashRegisterSessionSchema,
+    pendingTabs: z.array(PendingTabSchema).meta({
+      description:
+        'Comandas `open`/`closing` da unidade: não impedem fechar e seguem abertas para o próximo dia ou outro caixa (RN-05.28).',
+    }),
+    pendingTabsTotalCents: z.int(),
+    lastOpenRegister: z.boolean().meta({
+      description: 'É o último caixa aberto da unidade: a confirmação mostra o resto (RN-05.29).',
+    }),
+    itemsInProgress: z.int().meta({
+      description:
+        'Unidades em etapas não finais na unidade; só no último caixa ("Encerrar o preparo pendente", RN-04.08). 0 nos outros.',
+    }),
+    eventInProgress: z.object({ id: z.uuid(), contractorName: z.string() }).nullable().meta({
+      description:
+        'Evento em andamento, só no último caixa ("Encerrar também o evento", RN-05.29).',
+    }),
+  })
+  .meta({ id: 'CashRegisterClosePreview' });
+
+export type ClosePreviewDto = z.infer<typeof ClosePreviewSchema>;
 
 export const CloseCashRegisterRequestSchema = z
   .object({
@@ -333,11 +454,30 @@ export const CloseCashRegisterRequestSchema = z
       .max(500, { message: 'Use no máximo 500 caracteres.' })
       .optional()
       .meta({ description: 'Observação; obrigatória quando alguma diferença não é zero.' }),
+    finishPendingItems: z.boolean().default(true).meta({
+      description:
+        'Só no último caixa aberto: leva os itens em preparo à etapa final (padrão `true`, RN-04.08).',
+    }),
+    finishEvent: z.boolean().default(false).meta({
+      description: 'Só no último caixa aberto: encerra o evento em andamento (padrão `false`).',
+    }),
     version: ExpectedVersionSchema.optional(),
   })
   .meta({ id: 'CloseCashRegisterRequest' });
 
 export type CloseCashRegisterRequest = z.infer<typeof CloseCashRegisterRequestSchema>;
 
+export const CashRegisterRequiredDetailsSchema = z
+  .object({
+    cashRegisters: z.array(z.object({ id: z.uuid(), name: z.string() })),
+  })
+  .meta({
+    id: 'CashRegisterRequiredDetails',
+    description: '`details` do 409 `CASH_REGISTER_REQUIRED`: os caixas abertos (RN-05.05).',
+  });
+
 /** Named schemas that no route references directly. */
-export const cashContractSchemas: readonly z.ZodType[] = [CashRegisterStatusSchema];
+export const cashContractSchemas: readonly z.ZodType[] = [
+  CashRegisterSessionStatusSchema,
+  CashRegisterRequiredDetailsSchema,
+];

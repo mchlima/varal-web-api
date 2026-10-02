@@ -60,7 +60,7 @@ export interface Subject {
  * Decisions (documented in the README):
  * - Wrong password, unknown user, inactive user and user without a password give the same error,
  *   after the same argon2 work.
- * - Organizations `suspended` or `canceled` can still log in: RN-01.01 only blocks opening shifts.
+ * - Organizations `suspended` or `canceled` can still log in: RN-01.01 only blocks opening cash registers.
  * - Failed logins are not written to `audit_logs` (insert-only, it would grow with garbage from
  *   unknown identifiers); they feed the per-identifier lock and the lock is logged.
  */

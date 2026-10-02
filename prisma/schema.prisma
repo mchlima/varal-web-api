@@ -133,7 +133,8 @@ enum ImpersonationEndedBy {
   @@map("impersonation_ended_by")
 }
 
-/// Kind of shift, chosen when it opens and never changed (RN-04.04).
+/// Legacy (before 2026-10-02): kind of a shift (RN-04.04, removed). Only in the `shifts` table kept
+/// until the contraction migration (plan, phase 7.5).
 enum ShiftType {
   direct_sale
   contracted
@@ -141,6 +142,7 @@ enum ShiftType {
   @@map("shift_type")
 }
 
+/// Legacy: situation of a shift (see `ShiftType`).
 enum ShiftStatus {
   open
   closed
@@ -148,7 +150,7 @@ enum ShiftStatus {
   @@map("shift_status")
 }
 
-/// Modality of the agreement of a contracted shift (RN-04.05).
+/// Modality of the agreement of a contracted event (RN-04.05).
 enum AgreementModality {
   fixed_fee
   per_quantity
@@ -204,12 +206,24 @@ enum PaymentMethod {
   @@map("payment_method")
 }
 
-/// Cash register of a shift (spec 05, section 5). A closed register is never reopened (RN-05.21).
-enum CashRegisterStatus {
+/// Situation of a cash register session (abertura de caixa, spec 05, section 5). A closed session is
+/// never reopened (RN-05.21): opening the register again creates a new session.
+enum CashRegisterSessionStatus {
   open
   closed
 
   @@map("cash_register_status")
+}
+
+/// Situation of a contracted event (RN-04.34): `scheduled` → `in_progress` → `finished`;
+/// `scheduled` → `canceled`. Finished and canceled never come back.
+enum ContractedEventStatus {
+  scheduled
+  in_progress
+  finished
+  canceled
+
+  @@map("contracted_event_status")
 }
 
 /// `withdrawal`: sangria; `deposit`: suprimento (RN-05.18).
@@ -250,16 +264,21 @@ model Organization {
   announcementTargets   AnnouncementTarget[]
   announcementReads     AnnouncementRead[]
   impersonationSessions ImpersonationSession[]
-  // Spec 04 (turno e comandas).
-  shifts                Shift[]
-  shiftAgreements       ShiftAgreement[]
-  shiftPrices           ShiftPrice[]
+  // Spec 03 (tabelas de preço) and spec 04 (operação e comandas).
+  priceLists            PriceList[]
+  productPrices         ProductPrice[]
+  contractedEvents      ContractedEvent[]
   tabs                  Tab[]
   orders                Order[]
   orderItems            OrderItem[]
   orderItemModifiers    OrderItemModifier[]
+  // Legacy shifts, kept until the contraction migration (plan, phase 7.5).
+  shifts                Shift[]
+  shiftAgreements       ShiftAgreement[]
+  shiftPrices           ShiftPrice[]
   // Spec 05 (fechamento e caixa).
   cashRegisters         CashRegister[]
+  cashRegisterSessions  CashRegisterSession[]
   cashMovements         CashMovement[]
   cashRegisterCounts    CashRegisterCount[]
   payments              Payment[]
@@ -268,20 +287,31 @@ model Organization {
   @@map("organizations")
 }
 
-/// SQL-only: CHECK late_after_minutes BETWEEN 1 AND 240 (spec 03, section 3).
+/// SQL-only: CHECK late_after_minutes BETWEEN 1 AND 240 (spec 03, section 3); CHECK
+/// next_tab_number >= 1; FOREIGN KEY (organization_id, id, current_price_list_id) REFERENCES
+/// price_lists (organization_id, unit_id, id): the current price list is of the same unit.
 model Unit {
-  id               String   @id @default(uuid(7)) @db.Uuid
-  organizationId   String   @map("organization_id") @db.Uuid
-  name             String
-  active           Boolean  @default(true)
-  /// Minutes after which an item is shown as late (spec 03, section 3; spec 04).
-  lateAfterMinutes Int      @default(15) @map("late_after_minutes")
+  id                 String    @id @default(uuid(7)) @db.Uuid
+  organizationId     String    @map("organization_id") @db.Uuid
+  name               String
+  active             Boolean   @default(true)
+  /// Default of the time limits of new stations (spec 03, section 3; RN-03.25).
+  lateAfterMinutes   Int       @default(15) @map("late_after_minutes")
   /// Version of the unit settings, stations and workflow (`unit.config_updated`, concurrency).
-  version          Int      @default(0)
+  version            Int       @default(0)
   /// Version of the menu of the unit (`menu.updated`, spec 03, section 8).
-  menuVersion      Int      @default(0) @map("menu_version")
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  menuVersion        Int       @default(0) @map("menu_version")
+  /// Day of operation (RN-04.29): São Paulo date, changed only when the first cash register opens on
+  /// a new day. Null until the first register is opened.
+  businessDate       DateTime? @map("business_date") @db.Date
+  /// Next tab number in the day of operation (RN-04.09), incremented under the unit row lock.
+  nextTabNumber      Int       @default(1) @map("next_tab_number")
+  /// Current price list (RN-04.06, RN-04.31); null = "Normal".
+  currentPriceListId String?   @map("current_price_list_id") @db.Uuid
+  /// Version of `unit.operation_updated` (spec 04, section 7.1).
+  operationVersion   Int       @default(0) @map("operation_version")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization         Organization          @relation(fields: [organizationId], references: [id])
   staffUnitPermissions StaffUnitPermission[]
@@ -289,11 +319,14 @@ model Unit {
   workflowStages       WorkflowStage[]
   categories           Category[]
   products             Product[]
-  shifts               Shift[]
+  priceLists           PriceList[]
+  contractedEvents     ContractedEvent[]
   tabs                 Tab[]
   orderItems           OrderItem[]
   cashRegisters        CashRegister[]
+  cashSessions         CashRegisterSession[]
   customers            Customer[]
+  shifts               Shift[]
 
   @@unique([organizationId, name])
   /// Target of composite foreign keys that keep child rows in the same organization.
@@ -372,17 +405,22 @@ model StaffUnitPermission {
 // ---------------------------------------------------------------------------------------------
 
 /// A screen opened on a device (spec 03, section 4.1). Never deleted, only deactivated.
-/// SQL-only: UNIQUE (unit_id, lower(name)).
+/// SQL-only: UNIQUE (unit_id, lower(name)); CHECK the time limits exist only on `queue` stations,
+/// with 1 <= attention_after_minutes < late_after_minutes <= 240 (RN-03.25).
 model Station {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  organizationId String      @map("organization_id") @db.Uuid
-  unitId         String      @map("unit_id") @db.Uuid
-  name           String
-  kind           StationKind
-  sortOrder      Int         @map("sort_order")
-  active         Boolean     @default(true)
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+  id                    String      @id @default(uuid(7)) @db.Uuid
+  organizationId        String      @map("organization_id") @db.Uuid
+  unitId                String      @map("unit_id") @db.Uuid
+  name                  String
+  kind                  StationKind
+  sortOrder             Int         @map("sort_order")
+  active                Boolean     @default(true)
+  /// Card in "atenção" after these minutes since the order was sent (RN-03.25); only `queue`.
+  attentionAfterMinutes Int?        @map("attention_after_minutes")
+  /// Card "atrasado" after these minutes since the order was sent (RN-03.25); only `queue`.
+  lateAfterMinutes      Int?        @map("late_after_minutes")
+  createdAt             DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization    @relation(fields: [organizationId], references: [id])
   unit         Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
@@ -476,6 +514,7 @@ model Product {
   category       Category        @relation(fields: [organizationId, unitId, categoryId], references: [organizationId, unitId, id])
   station        Station?        @relation(fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id], onDelete: Restrict)
   modifierGroups ModifierGroup[]
+  prices         ProductPrice[]
   shiftPrices    ShiftPrice[]
   orderItems     OrderItem[]
 
@@ -527,137 +566,159 @@ model Modifier {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Shifts, tabs and orders (spec 04)
+// Price lists (spec 03, section 5.3)
 // ---------------------------------------------------------------------------------------------
 
-/// A work period of a unit (spec 04, section 3). At most one open shift per unit (RN-04.01).
-/// SQL-only: UNIQUE (unit_id) WHERE status = 'open'; CHECK next_tab_number >= 1;
-/// CHECK (status = 'closed') = (closed_at IS NOT NULL).
-model Shift {
-  id             String      @id @default(uuid(7)) @db.Uuid
-  organizationId String      @map("organization_id") @db.Uuid
-  unitId         String      @map("unit_id") @db.Uuid
-  type           ShiftType
-  status         ShiftStatus @default(open)
-  openedByType   ActorType   @map("opened_by_type")
-  openedById     String?     @map("opened_by_id") @db.Uuid
-  openedAt       DateTime    @map("opened_at") @db.Timestamptz(3)
-  closedByType   ActorType?  @map("closed_by_type")
-  closedById     String?     @map("closed_by_id") @db.Uuid
-  closedAt       DateTime?   @map("closed_at") @db.Timestamptz(3)
-  /// Number of the next tab (RN-04.09): incremented under the row lock, so two counters never get
-  /// the same number (CA-04.02).
-  nextTabNumber  Int         @default(1) @map("next_tab_number")
-  /// Incremented on every change of the shift (prices, closing): version of `shift.*` events.
-  version        Int         @default(0)
-  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
-
-  organization Organization    @relation(fields: [organizationId], references: [id])
-  unit         Unit            @relation(fields: [organizationId, unitId], references: [organizationId, id])
-  agreement    ShiftAgreement?
-  prices        ShiftPrice[]
-  tabs          Tab[]
-  orders        Order[]
-  cashRegisters CashRegister[]
-  payments      Payment[]
-
-  @@unique([organizationId, id])
-  @@index([organizationId, unitId, openedAt])
-  /// Report history across the units (spec 07, section 5).
-  @@index([organizationId, openedAt])
-  @@map("shifts")
-}
-
-/// Agreement of a contracted shift (RN-04.05). Informative in the MVP.
-/// SQL-only: CHECK agreed_amount_cents >= 0; CHECK agreed_quantity >= 1.
-model ShiftAgreement {
-  id                String            @id @default(uuid(7)) @db.Uuid
-  organizationId    String            @map("organization_id") @db.Uuid
-  shiftId           String            @map("shift_id") @db.Uuid
-  contractorName    String            @map("contractor_name")
-  modality          AgreementModality
-  agreedAmountCents Int?              @map("agreed_amount_cents")
-  agreedQuantity    Int?              @map("agreed_quantity")
-  limits            String?
-  notes             String?
-  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
-
-  organization Organization @relation(fields: [organizationId], references: [id])
-  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
-
-  /// One agreement per shift.
-  @@unique([organizationId, shiftId])
-  @@map("shift_agreements")
-}
-
-/// Price of a product in one shift (RN-04.06); other products keep the menu price.
-/// SQL-only: CHECK price_cents >= 0.
-model ShiftPrice {
+/// A saved list of alternative prices of a unit (RN-03.20), e.g. "Evento". Never deleted, only
+/// deactivated (RN-03.23): items sold point to it.
+/// SQL-only: CHECK char_length(name) BETWEEN 1 AND 30 AND lower(name) <> 'normal';
+/// UNIQUE (unit_id, lower(name)).
+model PriceList {
   id             String   @id @default(uuid(7)) @db.Uuid
   organizationId String   @map("organization_id") @db.Uuid
-  shiftId        String   @map("shift_id") @db.Uuid
+  unitId         String   @map("unit_id") @db.Uuid
+  name           String
+  sortOrder      Int      @map("sort_order")
+  active         Boolean  @default(true)
+  version        Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization      @relation(fields: [organizationId], references: [id])
+  unit         Unit              @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  prices       ProductPrice[]
+  events       ContractedEvent[]
+  orderItems   OrderItem[]
+
+  @@unique([organizationId, id])
+  /// Target of composite foreign keys: a list of the same unit (events, current list of the unit).
+  @@unique([organizationId, unitId, id])
+  @@index([organizationId, unitId])
+  @@map("price_lists")
+}
+
+/// Price of a product in a price list (RN-03.21). No row = the normal price.
+/// SQL-only: CHECK price_cents >= 0.
+model ProductPrice {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  priceListId    String   @map("price_list_id") @db.Uuid
   productId      String   @map("product_id") @db.Uuid
   priceCents     Int      @map("price_cents")
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id])
-  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  priceList    PriceList    @relation(fields: [organizationId, priceListId], references: [organizationId, id])
   product      Product      @relation(fields: [organizationId, productId], references: [organizationId, id])
 
-  @@unique([shiftId, productId])
-  @@index([organizationId, shiftId])
-  @@map("shift_prices")
+  @@unique([priceListId, productId])
+  @@index([organizationId, priceListId])
+  @@index([organizationId, productId])
+  @@map("product_prices")
 }
 
-/// A tab (comanda, spec 04, section 4). Never deleted: canceled (RN-04.12).
+// ---------------------------------------------------------------------------------------------
+// Operation: events, tabs and orders (spec 04)
+// ---------------------------------------------------------------------------------------------
+
+/// A contracted event (spec 04, section 3.3): contractor, dates, agreement (informative, RN-04.05)
+/// and optional price list. While `in_progress`, new tabs of the unit point to it (RN-04.36).
+/// SQL-only: UNIQUE (unit_id) WHERE status = 'in_progress' (RN-04.35); CHECK contractor 1..60;
+/// CHECK ends_on >= starts_on; CHECK agreed_amount_cents >= 0; CHECK agreed_quantity >= 1.
+model ContractedEvent {
+  id                String                @id @default(uuid(7)) @db.Uuid
+  organizationId    String                @map("organization_id") @db.Uuid
+  unitId            String                @map("unit_id") @db.Uuid
+  contractorName    String                @map("contractor_name")
+  startsOn          DateTime              @map("starts_on") @db.Date
+  endsOn            DateTime?             @map("ends_on") @db.Date
+  priceListId       String?               @map("price_list_id") @db.Uuid
+  modality          AgreementModality
+  agreedAmountCents Int?                  @map("agreed_amount_cents")
+  agreedQuantity    Int?                  @map("agreed_quantity")
+  limits            String?
+  notes             String?
+  status            ContractedEventStatus @default(scheduled)
+  startedAt         DateTime?             @map("started_at") @db.Timestamptz(3)
+  startedByType     ActorType?            @map("started_by_type")
+  startedById       String?               @map("started_by_id") @db.Uuid
+  finishedAt        DateTime?             @map("finished_at") @db.Timestamptz(3)
+  finishedByType    ActorType?            @map("finished_by_type")
+  finishedById      String?               @map("finished_by_id") @db.Uuid
+  canceledAt        DateTime?             @map("canceled_at") @db.Timestamptz(3)
+  version           Int                   @default(0)
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  priceList    PriceList?   @relation(fields: [organizationId, unitId, priceListId], references: [organizationId, unitId, id])
+  tabs         Tab[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, unitId, startsOn])
+  @@map("contracted_events")
+}
+
+/// A tab (comanda, spec 04, section 4). Never deleted: canceled (RN-04.12). It may pass from one day
+/// of operation to the next while open (RN-04.07).
 /// `customer_id`, `credit_at` and `settled_at`: fiado (spec 06); the discount is applied by spec 05.
 /// SQL-only: CHECK char_length(customer_name) BETWEEN 1 AND 40; CHECK number >= 1;
 /// CHECK discount_value >= 0; CHECK (discount_type IS NULL) = (discount_value IS NULL);
-/// CHECK on_credit/settled have customer_id and credit_at; CHECK (status = 'settled') = (settled_at IS NOT NULL).
+/// CHECK on_credit/settled have customer_id and credit_at; CHECK (status = 'settled') = (settled_at IS NOT NULL);
+/// UNIQUE (unit_id, number) WHERE status IN ('open', 'closing') (RN-04.09).
 model Tab {
-  id             String        @id @default(uuid(7)) @db.Uuid
-  organizationId String        @map("organization_id") @db.Uuid
-  shiftId        String        @map("shift_id") @db.Uuid
-  unitId         String        @map("unit_id") @db.Uuid
-  /// Sequential in the shift, from 1 (RN-04.09).
-  number         Int
-  customerName   String        @map("customer_name")
-  mode           TabMode
-  status         TabStatus
-  discountType   DiscountType? @map("discount_type")
-  discountValue  Int?          @map("discount_value")
-  discountReason String?       @map("discount_reason")
-  openedByType   ActorType     @map("opened_by_type")
-  openedById     String?       @map("opened_by_id") @db.Uuid
+  id                 String        @id @default(uuid(7)) @db.Uuid
+  organizationId     String        @map("organization_id") @db.Uuid
+  unitId             String        @map("unit_id") @db.Uuid
+  /// Sequential in the day of operation, never repeated among the open tabs (RN-04.09).
+  number             Int
+  /// Day of operation of the opening (RN-04.30).
+  businessDate       DateTime      @map("business_date") @db.Date
+  /// Day of operation when it left `open`/`closing` (RN-04.38): the day of the sale (spec 07).
+  closedBusinessDate DateTime?     @map("closed_business_date") @db.Date
+  /// Contracted event in progress when the tab was opened (RN-04.36).
+  eventId            String?       @map("event_id") @db.Uuid
+  customerName       String        @map("customer_name")
+  mode               TabMode
+  status             TabStatus
+  discountType       DiscountType? @map("discount_type")
+  discountValue      Int?          @map("discount_value")
+  discountReason     String?       @map("discount_reason")
+  openedByType       ActorType     @map("opened_by_type")
+  openedById         String?       @map("opened_by_id") @db.Uuid
   /// When it left `open`/`closing` for good (paid, on credit, canceled).
-  closedAt       DateTime?     @map("closed_at") @db.Timestamptz(3)
+  closedAt           DateTime?     @map("closed_at") @db.Timestamptz(3)
   /// Customer of a tab on credit (RN-06.05), kept after settling and after the customer is removed.
-  customerId     String?       @map("customer_id") @db.Uuid
+  customerId         String?       @map("customer_id") @db.Uuid
   /// When it was put on credit (spec 06, section 6).
-  creditAt       DateTime?     @map("credit_at") @db.Timestamptz(3)
+  creditAt           DateTime?     @map("credit_at") @db.Timestamptz(3)
   /// When the balance of a tab on credit reached zero (RN-06.10).
-  settledAt      DateTime?     @map("settled_at") @db.Timestamptz(3)
+  settledAt          DateTime?     @map("settled_at") @db.Timestamptz(3)
   /// Concurrency and version of `tab.*` events: incremented on status, orders and totals changes.
-  version        Int           @default(0)
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version            Int           @default(0)
+  /// Legacy: shift of the tabs created before 2026-10-02 (dropped by the contraction migration).
+  shiftId            String?       @map("shift_id") @db.Uuid
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
-  unit         Unit         @relation(fields: [organizationId, unitId], references: [organizationId, id])
-  customer     Customer?    @relation(fields: [organizationId, customerId], references: [organizationId, id])
+  organization Organization     @relation(fields: [organizationId], references: [id])
+  unit         Unit             @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  event        ContractedEvent? @relation(fields: [organizationId, eventId], references: [organizationId, id])
+  customer     Customer?        @relation(fields: [organizationId, customerId], references: [organizationId, id])
+  shift        Shift?           @relation(fields: [organizationId, shiftId], references: [organizationId, id])
   orders       Order[]
   items        OrderItem[]
   payments     Payment[]
 
-  @@unique([shiftId, number])
   @@unique([organizationId, id])
-  @@index([organizationId, shiftId, status])
   @@index([organizationId, unitId, status])
   @@index([organizationId, customerId])
+  /// Reports by day of operation (spec 07, section 9).
+  @@index([organizationId, unitId, businessDate])
+  @@index([organizationId, unitId, closedBusinessDate])
+  @@index([organizationId, eventId])
   @@map("tabs")
 }
 
@@ -667,8 +728,7 @@ model Order {
   id             String      @id @default(uuid(7)) @db.Uuid
   organizationId String      @map("organization_id") @db.Uuid
   tabId          String      @map("tab_id") @db.Uuid
-  shiftId        String      @map("shift_id") @db.Uuid
-  /// 1, 2, 3… in the tab.
+  /// 1, 2, 3… in the tab; from 2 on, the card is an "Adicional" (RN-04.44).
   numberInTab    Int         @map("number_in_tab")
   status         OrderStatus @default(sent)
   createdByType  ActorType   @map("created_by_type")
@@ -677,12 +737,14 @@ model Order {
   completedAt    DateTime?   @map("completed_at") @db.Timestamptz(3)
   /// Version of `order.*` events.
   version        Int         @default(0)
+  /// Legacy: shift of the orders sent before 2026-10-02 (dropped by the contraction migration).
+  shiftId        String?     @map("shift_id") @db.Uuid
   createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization @relation(fields: [organizationId], references: [id])
   tab          Tab          @relation(fields: [organizationId, tabId], references: [organizationId, id])
-  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  shift        Shift?       @relation(fields: [organizationId, shiftId], references: [organizationId, id])
   items        OrderItem[]
 
   @@unique([tabId, numberInTab])
@@ -691,48 +753,54 @@ model Order {
   @@map("orders")
 }
 
-/// One line of an order with a copy of what was sold (RN-04.18): name, unit price of the moment and
-/// preparation station. Splitting a line (advance part of it, RN-04.24, or cancel part of it,
-/// RN-04.26) creates a new line pointing to the original in `split_from_id`.
+/// One line of an order with a copy of what was sold (RN-04.18): name, unit price of the moment, the
+/// price list used and the preparation station. Splitting a line (advance part of it, RN-04.24, or
+/// cancel part of it, RN-04.26) creates a new line pointing to the original in `split_from_id`.
 /// `station_id` is the station where the line shows up now (from the stage, spec 03 section 4.2),
 /// null in the final stage or when canceled. Never deleted.
 /// SQL-only: CHECK quantity BETWEEN 1 AND 99; CHECK unit_price_cents >= 0;
 /// CHECK note IS NULL OR char_length(note) <= 140; CHECK cancel_reason length <= 140;
-/// CHECK (canceled_at IS NULL) = (cancel_reason IS NULL); CHECK canceled lines have no station.
+/// CHECK (canceled_at IS NULL) = (cancel_reason IS NULL); CHECK canceled lines have no station;
+/// CHECK (canceled_at IS NULL) = (canceled_business_date IS NULL).
 model OrderItem {
-  id             String     @id @default(uuid(7)) @db.Uuid
-  organizationId String     @map("organization_id") @db.Uuid
-  orderId        String     @map("order_id") @db.Uuid
-  tabId          String     @map("tab_id") @db.Uuid
-  unitId         String     @map("unit_id") @db.Uuid
-  productId      String     @map("product_id") @db.Uuid
-  productName    String     @map("product_name")
-  unitPriceCents Int        @map("unit_price_cents")
-  quantity       Int
-  note           String?
+  id                   String     @id @default(uuid(7)) @db.Uuid
+  organizationId       String     @map("organization_id") @db.Uuid
+  orderId              String     @map("order_id") @db.Uuid
+  tabId                String     @map("tab_id") @db.Uuid
+  unitId               String     @map("unit_id") @db.Uuid
+  productId            String     @map("product_id") @db.Uuid
+  productName          String     @map("product_name")
+  unitPriceCents       Int        @map("unit_price_cents")
+  /// Price list whose price was used (RN-04.18); null = the normal price.
+  priceListId          String?    @map("price_list_id") @db.Uuid
+  quantity             Int
+  note                 String?
   /// Position of the line in the order as sent (split lines keep the position of the original).
-  position       Int
-  prepStationId  String     @map("prep_station_id") @db.Uuid
-  stageId        String     @map("stage_id") @db.Uuid
-  stationId      String?    @map("station_id") @db.Uuid
-  stageEnteredAt DateTime   @map("stage_entered_at") @db.Timestamptz(3)
-  canceledAt     DateTime?  @map("canceled_at") @db.Timestamptz(3)
-  canceledByType ActorType? @map("canceled_by_type")
-  canceledById   String?    @map("canceled_by_id") @db.Uuid
-  cancelReason   String?    @map("cancel_reason")
+  position             Int
+  prepStationId        String     @map("prep_station_id") @db.Uuid
+  stageId              String     @map("stage_id") @db.Uuid
+  stationId            String?    @map("station_id") @db.Uuid
+  stageEnteredAt       DateTime   @map("stage_entered_at") @db.Timestamptz(3)
+  canceledAt           DateTime?  @map("canceled_at") @db.Timestamptz(3)
+  /// Day of operation of the cancellation (RN-04.27, RN-04.30): waste is counted by it (RN-07.04).
+  canceledBusinessDate DateTime?  @map("canceled_business_date") @db.Date
+  canceledByType       ActorType? @map("canceled_by_type")
+  canceledById         String?    @map("canceled_by_id") @db.Uuid
+  cancelReason         String?    @map("cancel_reason")
   /// Canceled after leaving the first stage (RN-04.27).
-  wasted         Boolean    @default(false)
-  splitFromId    String?    @map("split_from_id") @db.Uuid
+  wasted               Boolean    @default(false)
+  splitFromId          String?    @map("split_from_id") @db.Uuid
   /// Optimistic concurrency of every stage change and cancellation (`ITEM_CHANGED`).
-  version        Int        @default(0)
-  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  version              Int        @default(0)
+  createdAt            DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization        @relation(fields: [organizationId], references: [id])
   order        Order               @relation(fields: [organizationId, orderId], references: [organizationId, id])
   tab          Tab                 @relation(fields: [organizationId, tabId], references: [organizationId, id])
   unit         Unit                @relation(fields: [organizationId, unitId], references: [organizationId, id])
   product      Product             @relation(fields: [organizationId, productId], references: [organizationId, id])
+  priceList    PriceList?          @relation(fields: [organizationId, priceListId], references: [organizationId, id])
   stage        WorkflowStage       @relation(fields: [organizationId, unitId, stageId], references: [organizationId, unitId, id])
   prepStation  Station             @relation("OrderItemPrepStation", fields: [organizationId, unitId, prepStationId], references: [organizationId, unitId, id])
   station      Station?            @relation("OrderItemStation", fields: [organizationId, unitId, stationId], references: [organizationId, unitId, id])
@@ -744,6 +812,8 @@ model OrderItem {
   @@index([organizationId, orderId])
   @@index([organizationId, tabId])
   @@index([organizationId, stationId])
+  /// Waste by day of operation (RN-07.04).
+  @@index([organizationId, unitId, canceledBusinessDate])
   @@map("order_items")
 }
 
@@ -769,118 +839,239 @@ model OrderItemModifier {
   @@map("order_item_modifiers")
 }
 
-/// A cash register of a shift (spec 05, section 5): several may be open at once (RN-05.17).
-/// SQL-only: CHECK opening_float_cents >= 0; CHECK name 1..40 characters;
-/// CHECK (status = 'closed') = (closed_at IS NOT NULL); unique (shift_id, lower(name)).
+// ---------------------------------------------------------------------------------------------
+// Cash (spec 05)
+// ---------------------------------------------------------------------------------------------
+
+/// A cash register of the unit (cadastro, RN-05.17), e.g. "Caixa 1", "Balcão": opened and closed
+/// many times, each time a {@link CashRegisterSession}. Never deleted, only deactivated (RN-05.27).
+/// SQL-only: CHECK char_length(name) BETWEEN 1 AND 40; UNIQUE (unit_id, lower(name)).
 model CashRegister {
-  id                String             @id @default(uuid(7)) @db.Uuid
-  organizationId    String             @map("organization_id") @db.Uuid
-  shiftId           String             @map("shift_id") @db.Uuid
-  unitId            String             @map("unit_id") @db.Uuid
-  name              String
-  status            CashRegisterStatus @default(open)
-  /// Fundo de troco, in cash (RN-05.17).
-  openingFloatCents Int                @map("opening_float_cents")
-  openedByType      ActorType          @map("opened_by_type")
-  openedById        String?            @map("opened_by_id") @db.Uuid
-  openedAt          DateTime           @map("opened_at") @db.Timestamptz(3)
-  closedByType      ActorType?         @map("closed_by_type")
-  closedById        String?            @map("closed_by_id") @db.Uuid
-  closedAt          DateTime?          @map("closed_at") @db.Timestamptz(3)
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  unitId         String   @map("unit_id") @db.Uuid
+  name           String
+  sortOrder      Int      @map("sort_order")
+  active         Boolean  @default(true)
+  /// Incremented on every change of the register or of its sessions: version of `cash_register.*`.
+  version        Int      @default(0)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization          @relation(fields: [organizationId], references: [id])
+  unit         Unit                  @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  sessions     CashRegisterSession[]
+
+  @@unique([organizationId, unitId, id])
+  @@index([organizationId, unitId])
+  @@map("cash_registers")
+}
+
+/// A session of a cash register (abertura de caixa, spec 05, section 5): from opening with the float
+/// to closing with the count. At most one open session per register (RN-05.23).
+/// SQL-only: UNIQUE (cash_register_id) WHERE status = 'open'; CHECK opening_float_cents >= 0;
+/// CHECK (status = 'closed') = (closed_at IS NOT NULL); pending counts >= 0.
+model CashRegisterSession {
+  id                    String                    @id @default(uuid(7)) @db.Uuid
+  organizationId        String                    @map("organization_id") @db.Uuid
+  cashRegisterId        String                    @map("cash_register_id") @db.Uuid
+  unitId                String                    @map("unit_id") @db.Uuid
+  /// Day of operation of the unit when the session opened (RN-05.25).
+  businessDate          DateTime                  @map("business_date") @db.Date
+  status                CashRegisterSessionStatus @default(open)
+  /// Fundo de troco, in cash (RN-05.23).
+  openingFloatCents     Int                       @map("opening_float_cents")
+  openedByType          ActorType                 @map("opened_by_type")
+  openedById            String?                   @map("opened_by_id") @db.Uuid
+  openedAt              DateTime                  @map("opened_at") @db.Timestamptz(3)
+  closedByType          ActorType?                @map("closed_by_type")
+  closedById            String?                   @map("closed_by_id") @db.Uuid
+  closedAt              DateTime?                 @map("closed_at") @db.Timestamptz(3)
   /// Required when any method closes with a difference (RN-05.20).
-  closingNote       String?            @map("closing_note")
-  /// Incremented on every payment, reversal, movement and on closing: version of `cash_register.*`.
-  version           Int                @default(0)
-  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  closingNote           String?                   @map("closing_note")
+  /// Tabs still `open`/`closing` in the unit when the session closed (RN-05.28).
+  pendingTabsCount      Int?                      @map("pending_tabs_count")
+  pendingTabsTotalCents Int?                      @map("pending_tabs_total_cents")
+  /// Incremented on every payment, reversal, movement and on closing.
+  version               Int                       @default(0)
+  /// Legacy: shift of the sessions migrated from the registers of a shift (contraction drops it).
+  shiftId               String?                   @map("shift_id") @db.Uuid
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   organization Organization        @relation(fields: [organizationId], references: [id])
-  shift        Shift               @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  cashRegister CashRegister        @relation(fields: [organizationId, unitId, cashRegisterId], references: [organizationId, unitId, id])
   unit         Unit                @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  shift        Shift?              @relation(fields: [organizationId, shiftId], references: [organizationId, id])
   movements    CashMovement[]
   counts       CashRegisterCount[]
   payments     Payment[]
 
   @@unique([organizationId, id])
-  @@index([organizationId, shiftId, status])
-  @@map("cash_registers")
+  @@index([organizationId, unitId, status])
+  @@index([organizationId, unitId, businessDate])
+  @@index([organizationId, cashRegisterId])
+  @@map("cash_register_sessions")
 }
 
 /// Sangria or suprimento (RN-05.18). Never deleted.
 /// SQL-only: CHECK amount_cents > 0; CHECK reason 1..140 characters.
 model CashMovement {
-  id             String           @id @default(uuid(7)) @db.Uuid
-  organizationId String           @map("organization_id") @db.Uuid
-  cashRegisterId String           @map("cash_register_id") @db.Uuid
-  type           CashMovementType
-  amountCents    Int              @map("amount_cents")
-  reason         String
-  createdByType  ActorType        @map("created_by_type")
-  createdById    String?          @map("created_by_id") @db.Uuid
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                    String           @id @default(uuid(7)) @db.Uuid
+  organizationId        String           @map("organization_id") @db.Uuid
+  cashRegisterSessionId String           @map("cash_register_session_id") @db.Uuid
+  type                  CashMovementType
+  amountCents           Int              @map("amount_cents")
+  reason                String
+  createdByType         ActorType        @map("created_by_type")
+  createdById           String?          @map("created_by_id") @db.Uuid
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  session      CashRegisterSession @relation(fields: [organizationId, cashRegisterSessionId], references: [organizationId, id])
 
-  @@index([organizationId, cashRegisterId])
+  @@index([organizationId, cashRegisterSessionId])
   @@map("cash_movements")
 }
 
-/// What was counted per method when the register closed (RN-05.20).
+/// What was counted per method when the session closed (RN-05.20).
 /// SQL-only: CHECK informed_cents >= 0; CHECK difference_cents = informed_cents - expected_cents.
 model CashRegisterCount {
-  id              String        @id @default(uuid(7)) @db.Uuid
-  organizationId  String        @map("organization_id") @db.Uuid
-  cashRegisterId  String        @map("cash_register_id") @db.Uuid
-  method          PaymentMethod
-  expectedCents   Int           @map("expected_cents")
-  informedCents   Int           @map("informed_cents")
-  differenceCents Int           @map("difference_cents")
-  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  organizationId        String        @map("organization_id") @db.Uuid
+  cashRegisterSessionId String        @map("cash_register_session_id") @db.Uuid
+  method                PaymentMethod
+  expectedCents         Int           @map("expected_cents")
+  informedCents         Int           @map("informed_cents")
+  differenceCents       Int           @map("difference_cents")
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  session      CashRegisterSession @relation(fields: [organizationId, cashRegisterSessionId], references: [organizationId, id])
 
-  @@unique([cashRegisterId, method])
-  @@index([organizationId, cashRegisterId])
+  @@unique([cashRegisterSessionId, method])
+  @@index([organizationId, cashRegisterSessionId])
   @@map("cash_register_counts")
 }
 
-/// A registered payment (spec 05, section 4). Reversed, never deleted (RN-05.15). `shift_id` is the
-/// shift the money came in, which differs from the tab's on a credit settlement (spec 06).
+/// A registered payment (spec 05, section 4). Reversed, never deleted (RN-05.15). It belongs to the
+/// cash register session the money came in (RN-05.05), whose day may differ from the tab's (a tab
+/// that passed to the next day, a credit settlement).
 /// SQL-only: CHECK amount_cents > 0; cash has tendered/change (tendered = amount + change), the
 /// other methods have neither; reversal fields all set or all null, reason 1..140 characters.
 model Payment {
-  id                 String        @id @default(uuid(7)) @db.Uuid
-  organizationId     String        @map("organization_id") @db.Uuid
-  tabId              String        @map("tab_id") @db.Uuid
-  shiftId            String        @map("shift_id") @db.Uuid
-  cashRegisterId     String        @map("cash_register_id") @db.Uuid
-  method             PaymentMethod
+  id                    String        @id @default(uuid(7)) @db.Uuid
+  organizationId        String        @map("organization_id") @db.Uuid
+  tabId                 String        @map("tab_id") @db.Uuid
+  cashRegisterSessionId String        @map("cash_register_session_id") @db.Uuid
+  method                PaymentMethod
   /// Applied amount (RN-05.09).
-  amountCents        Int           @map("amount_cents")
-  tenderedCents      Int?          @map("tendered_cents")
-  changeCents        Int?          @map("change_cents")
+  amountCents           Int           @map("amount_cents")
+  tenderedCents         Int?          @map("tendered_cents")
+  changeCents           Int?          @map("change_cents")
   /// Settlement of a tab on credit (spec 06).
-  isCreditSettlement Boolean       @default(false) @map("is_credit_settlement")
-  receivedByType     ActorType     @map("received_by_type")
-  receivedById       String?       @map("received_by_id") @db.Uuid
-  reversedAt         DateTime?     @map("reversed_at") @db.Timestamptz(3)
-  reversedByType     ActorType?    @map("reversed_by_type")
-  reversedById       String?       @map("reversed_by_id") @db.Uuid
-  reversalReason     String?       @map("reversal_reason")
-  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  isCreditSettlement    Boolean       @default(false) @map("is_credit_settlement")
+  receivedByType        ActorType     @map("received_by_type")
+  receivedById          String?       @map("received_by_id") @db.Uuid
+  reversedAt            DateTime?     @map("reversed_at") @db.Timestamptz(3)
+  reversedByType        ActorType?    @map("reversed_by_type")
+  reversedById          String?       @map("reversed_by_id") @db.Uuid
+  reversalReason        String?       @map("reversal_reason")
+  /// Legacy: shift the money came in, before 2026-10-02 (dropped by the contraction migration).
+  shiftId               String?       @map("shift_id") @db.Uuid
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  organization Organization @relation(fields: [organizationId], references: [id])
-  tab          Tab          @relation(fields: [organizationId, tabId], references: [organizationId, id])
-  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
-  cashRegister CashRegister @relation(fields: [organizationId, cashRegisterId], references: [organizationId, id])
+  organization Organization        @relation(fields: [organizationId], references: [id])
+  tab          Tab                 @relation(fields: [organizationId, tabId], references: [organizationId, id])
+  session      CashRegisterSession @relation(fields: [organizationId, cashRegisterSessionId], references: [organizationId, id])
+  shift        Shift?              @relation(fields: [organizationId, shiftId], references: [organizationId, id])
 
   @@index([organizationId, tabId])
-  @@index([organizationId, cashRegisterId])
-  /// Received in a shift, sales and settlements (spec 07, RN-07.02).
-  @@index([organizationId, shiftId])
+  /// Received per session and per day of operation (RN-07.02).
+  @@index([organizationId, cashRegisterSessionId])
   @@map("payments")
+}
+
+// ---------------------------------------------------------------------------------------------
+// Legacy shifts (before 2026-10-02). Read only by the migration check (scripts/verify-migration.ts);
+// the contraction migration drops these tables (plan, phase 7.5, step 7).
+// ---------------------------------------------------------------------------------------------
+
+/// Legacy work period of a unit (old spec 04). Never written by the API anymore.
+/// SQL-only: UNIQUE (unit_id) WHERE status = 'open'; CHECK next_tab_number >= 1;
+/// CHECK (status = 'closed') = (closed_at IS NOT NULL).
+model Shift {
+  id             String      @id @default(uuid(7)) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  unitId         String      @map("unit_id") @db.Uuid
+  type           ShiftType
+  status         ShiftStatus @default(open)
+  openedByType   ActorType   @map("opened_by_type")
+  openedById     String?     @map("opened_by_id") @db.Uuid
+  openedAt       DateTime    @map("opened_at") @db.Timestamptz(3)
+  closedByType   ActorType?  @map("closed_by_type")
+  closedById     String?     @map("closed_by_id") @db.Uuid
+  closedAt       DateTime?   @map("closed_at") @db.Timestamptz(3)
+  nextTabNumber  Int         @default(1) @map("next_tab_number")
+  version        Int         @default(0)
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization          @relation(fields: [organizationId], references: [id])
+  unit         Unit                  @relation(fields: [organizationId, unitId], references: [organizationId, id])
+  agreement    ShiftAgreement?
+  prices       ShiftPrice[]
+  tabs         Tab[]
+  orders       Order[]
+  sessions     CashRegisterSession[]
+  payments     Payment[]
+
+  @@unique([organizationId, id])
+  @@index([organizationId, unitId, openedAt])
+  @@index([organizationId, openedAt])
+  @@map("shifts")
+}
+
+/// Legacy agreement of a contracted shift; migrated to `contracted_events`.
+/// SQL-only: CHECK agreed_amount_cents >= 0; CHECK agreed_quantity >= 1.
+model ShiftAgreement {
+  id                String            @id @default(uuid(7)) @db.Uuid
+  organizationId    String            @map("organization_id") @db.Uuid
+  shiftId           String            @map("shift_id") @db.Uuid
+  contractorName    String            @map("contractor_name")
+  modality          AgreementModality
+  agreedAmountCents Int?              @map("agreed_amount_cents")
+  agreedQuantity    Int?              @map("agreed_quantity")
+  limits            String?
+  notes             String?
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+
+  @@unique([organizationId, shiftId])
+  @@map("shift_agreements")
+}
+
+/// Legacy price of a product in one shift; migrated to `price_lists` and `product_prices`.
+/// SQL-only: CHECK price_cents >= 0.
+model ShiftPrice {
+  id             String   @id @default(uuid(7)) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  shiftId        String   @map("shift_id") @db.Uuid
+  productId      String   @map("product_id") @db.Uuid
+  priceCents     Int      @map("price_cents")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id])
+  shift        Shift        @relation(fields: [organizationId, shiftId], references: [organizationId, id])
+  product      Product      @relation(fields: [organizationId, productId], references: [organizationId, id])
+
+  @@unique([shiftId, productId])
+  @@index([organizationId, shiftId])
+  @@map("shift_prices")
 }
 
 // ---------------------------------------------------------------------------------------------

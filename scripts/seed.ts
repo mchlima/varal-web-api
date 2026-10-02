@@ -8,12 +8,14 @@
  *   "Retirar") and drinks routed to the delivery counter (RN-03.08).
  * - Owner dono@varal.local; staff members `ana` (Balcão and Balcão de entrega, operates cash) and
  *   `bruno` (Cozinha).
- * - An open shift (spec 04) in the unit with three tabs and orders in different stages, for the
- *   counter, station and owner screens: created once, only when the unit has never had a shift
- *   (close it in the app and the seed will not open another).
- * - In that shift (spec 05), "Caixa 1" opened by `ana` with R$ 100,00 of float, a partial Pix on
- *   "Mesa da família" and a "paga antes" tab paid in cash with change: created once, while the
- *   open shift has no cash register.
+ * - The register "Caixa 1" of the unit (spec 05, RN-05.17) and a price list "Evento" (spec 03,
+ *   section 5.3) with prices for some skewers, not current.
+ * - "Caixa 1" open (spec 05), by `ana` with R$ 100,00 of float, starting today's day of operation,
+ *   with three tabs and orders in different stages for the counter, station and owner screens:
+ *   created once, only when the unit has never had a register open (close it in the app and the
+ *   seed will not open another).
+ * - In that session, a partial Pix on "Mesa da família" and a "paga antes" tab paid in cash with
+ *   change: created once, while the open session has no payment.
  * - Platform admin admin@varal.local, with the Super admin role (spec 02, RN-02.05). The system roles
  *   come from the migration; the seed only creates any that are missing (never changes them).
  * - DEVELOPMENT ONLY password `varal12345` for the owner, both staff members and the admin. It is set
@@ -24,6 +26,7 @@ import { SUPER_ADMIN_KEY, SYSTEM_ROLE_KEYS, SYSTEM_ROLES } from '../src/admin/rb
 import { AuditService } from '../src/audit/audit.service.js';
 import { hashPassword } from '../src/auth/password-hasher.js';
 import type { Prisma, PrismaClient } from '../src/generated/prisma/client.js';
+import { dateColumn, todayInSaoPaulo } from '../src/common/time.js';
 import { UnitTemplateService } from '../src/units/unit-template.service.js';
 
 interface SeedModifierGroup {
@@ -216,7 +219,13 @@ export async function seed(prisma: PrismaClient): Promise<SeedResult> {
       staffMemberIds.push(member.id);
     }
 
-    await seedShift(tx, { organizationId, unitId: unit.id, ownerId: owner.id });
+    await seedPriceList(tx, { organizationId, unitId: unit.id });
+    await seedOperation(tx, {
+      organizationId,
+      unitId: unit.id,
+      ownerId: owner.id,
+      cashierId: staffMemberIds[0] ?? null,
+    });
     await seedCash(tx, { organizationId, unitId: unit.id, cashierId: staffMemberIds[0] ?? null });
     await seedCredit(tx, { organizationId, unitId: unit.id, cashierId: staffMemberIds[0] ?? null });
 
@@ -351,7 +360,62 @@ interface SeedTab {
   lines: readonly SeedLine[];
 }
 
-/** Example tabs of the open shift (spec 04): numbers 1, 2 and 3. */
+/** Spec 03, section 5.3: the "Evento" list of the pilot, with prices for some skewers. */
+export const SEED_PRICE_LIST = {
+  name: 'Evento',
+  prices: [
+    { product: 'Espeto de carne', priceCents: 1500 },
+    { product: 'Kafta', priceCents: 1400 },
+  ],
+} as const;
+
+/** Creates the "Evento" list once (looked up by name); never makes it current. */
+async function seedPriceList(
+  tx: Prisma.TransactionClient,
+  scope: { organizationId: string; unitId: string },
+): Promise<void> {
+  const { organizationId, unitId } = scope;
+  if (
+    await tx.priceList.findFirst({
+      where: {
+        organizationId,
+        unitId,
+        name: { equals: SEED_PRICE_LIST.name, mode: 'insensitive' },
+      },
+    })
+  ) {
+    return;
+  }
+  const last = await tx.priceList.aggregate({
+    where: { organizationId, unitId },
+    _max: { sortOrder: true },
+  });
+  const list = await tx.priceList.create({
+    data: {
+      organizationId,
+      unitId,
+      name: SEED_PRICE_LIST.name,
+      sortOrder: (last._max.sortOrder ?? 0) + 1,
+    },
+  });
+  for (const price of SEED_PRICE_LIST.prices) {
+    const product = await tx.product.findFirst({
+      where: { organizationId, unitId, name: price.product },
+    });
+    if (product) {
+      await tx.productPrice.create({
+        data: {
+          organizationId,
+          priceListId: list.id,
+          productId: product.id,
+          priceCents: price.priceCents,
+        },
+      });
+    }
+  }
+}
+
+/** Example tabs of the open register (spec 04): numbers 1, 2 and 3 of today. */
 export const SEED_TABS: readonly SeedTab[] = [
   {
     customerName: 'Dona Marta',
@@ -396,16 +460,24 @@ export const SEED_TABS: readonly SeedTab[] = [
 ];
 
 /**
- * Open shift with example tabs (spec 04), written once: nothing happens when the unit already has
- * (or had) a shift. Items copy name and price of the menu (RN-04.18) and sit at the station of
- * their stage (spec 03, section 4.2).
+ * "Caixa 1" open with example tabs (specs 04 and 05), written once: nothing happens when the unit
+ * already has (or had) a register open. The session starts today's day of operation (RN-04.29);
+ * items copy name and price of the menu (RN-04.18) and sit at the station of their stage (spec 03,
+ * section 4.2).
  */
-async function seedShift(
+async function seedOperation(
   tx: Prisma.TransactionClient,
-  scope: { organizationId: string; unitId: string; ownerId: string },
+  scope: { organizationId: string; unitId: string; ownerId: string; cashierId: string | null },
 ): Promise<void> {
-  const { organizationId, unitId, ownerId } = scope;
-  if ((await tx.shift.count({ where: { organizationId, unitId } })) > 0) {
+  const { organizationId, unitId, ownerId, cashierId } = scope;
+  if ((await tx.cashRegisterSession.count({ where: { organizationId, unitId } })) > 0) {
+    return;
+  }
+  const register = await tx.cashRegister.findFirst({
+    where: { organizationId, unitId, active: true },
+    orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
+  });
+  if (!register) {
     return;
   }
   const stages = await tx.workflowStage.findMany({
@@ -417,16 +489,22 @@ async function seedShift(
     include: { category: true, modifierGroups: { include: { modifiers: true } } },
   });
   const now = Date.now();
-  const shift = await tx.shift.create({
+  const businessDate = dateColumn(todayInSaoPaulo());
+  await tx.unit.update({
+    where: { id: unitId },
+    data: { businessDate, nextTabNumber: SEED_TABS.length + 1 },
+  });
+  await tx.cashRegisterSession.create({
     data: {
       organizationId,
+      cashRegisterId: register.id,
       unitId,
-      type: 'direct_sale',
+      businessDate,
       status: 'open',
-      openedByType: 'owner',
-      openedById: ownerId,
+      openingFloatCents: 10_000,
+      openedByType: cashierId === null ? 'owner' : 'staff',
+      openedById: cashierId ?? ownerId,
       openedAt: new Date(now - 60 * 60_000),
-      nextTabNumber: SEED_TABS.length + 1,
     },
   });
   for (const [tabIndex, seedTab] of SEED_TABS.entries()) {
@@ -434,9 +512,9 @@ async function seedShift(
     const tab = await tx.tab.create({
       data: {
         organizationId,
-        shiftId: shift.id,
         unitId,
         number: tabIndex + 1,
+        businessDate,
         customerName: seedTab.customerName,
         mode: 'open_tab',
         status: seedTab.status,
@@ -450,7 +528,6 @@ async function seedShift(
       data: {
         organizationId,
         tabId: tab.id,
-        shiftId: shift.id,
         numberInTab: 1,
         status: done ? 'completed' : 'sent',
         createdByType: 'owner',
@@ -550,18 +627,20 @@ export const SEED_PAY_FIRST = {
 } as const;
 
 /**
- * A cash register with payments in the open example shift (spec 05), written once: nothing happens
- * without an open shift or when it already has a register.
+ * Payments in the open example session (spec 05), written once: nothing happens without an open
+ * session or when it already has a payment.
  */
 async function seedCash(
   tx: Prisma.TransactionClient,
   scope: { organizationId: string; unitId: string; cashierId: string | null },
 ): Promise<void> {
   const { organizationId, unitId, cashierId } = scope;
-  const shift = await tx.shift.findFirst({ where: { organizationId, unitId, status: 'open' } });
+  const session = await tx.cashRegisterSession.findFirst({
+    where: { organizationId, unitId, status: 'open' },
+  });
   if (
-    !shift ||
-    (await tx.cashRegister.count({ where: { organizationId, shiftId: shift.id } })) > 0
+    !session ||
+    (await tx.payment.count({ where: { organizationId, cashRegisterSessionId: session.id } })) > 0
   ) {
     return;
   }
@@ -569,19 +648,6 @@ async function seedCash(
     cashierId === null
       ? { type: 'system' as const, id: null }
       : { type: 'staff' as const, id: cashierId };
-  const register = await tx.cashRegister.create({
-    data: {
-      organizationId,
-      shiftId: shift.id,
-      unitId,
-      name: 'Caixa 1',
-      status: 'open',
-      openingFloatCents: 10_000,
-      openedByType: actor.type,
-      openedById: actor.id,
-      openedAt: shift.openedAt,
-    },
-  });
   const payment = (
     tabId: string,
     method: 'pix' | 'cash',
@@ -592,8 +658,7 @@ async function seedCash(
       data: {
         organizationId,
         tabId,
-        shiftId: shift.id,
-        cashRegisterId: register.id,
+        cashRegisterSessionId: session.id,
         method,
         amountCents,
         tenderedCents: tenderedCents ?? null,
@@ -605,7 +670,7 @@ async function seedCash(
 
   // A partial Pix on the tab in `closing`: half of its total, the rest still to receive.
   const closing = await tx.tab.findFirst({
-    where: { organizationId, shiftId: shift.id, status: 'closing' },
+    where: { organizationId, unitId, status: 'closing' },
     include: { items: { include: { modifiers: true } } },
   });
   if (closing) {
@@ -635,17 +700,18 @@ async function seedCash(
   if (!product || !final) {
     return;
   }
-  const numbered = await tx.shift.update({
-    where: { id: shift.id },
+  const numbered = await tx.unit.update({
+    where: { id: unitId },
     data: { nextTabNumber: { increment: 1 } },
   });
   const now = new Date();
   const tab = await tx.tab.create({
     data: {
       organizationId,
-      shiftId: shift.id,
       unitId,
       number: numbered.nextTabNumber - 1,
+      businessDate: session.businessDate,
+      closedBusinessDate: session.businessDate,
       customerName: SEED_PAY_FIRST.customerName,
       mode: 'pay_first',
       status: 'paid',
@@ -658,7 +724,6 @@ async function seedCash(
     data: {
       organizationId,
       tabId: tab.id,
-      shiftId: shift.id,
       numberInTab: 1,
       status: 'completed',
       createdByType: actor.type,
@@ -694,7 +759,7 @@ export const SEED_CUSTOMERS = [
   { name: 'Dona Cida', phone: null, reference: 'Barraca do lado' },
 ] as const;
 
-/** Spec 06: a tab of the open shift put on credit for "Dona Cida". */
+/** Spec 06: a tab of today put on credit for "Dona Cida". */
 export const SEED_ON_CREDIT = {
   customerName: 'Dona Cida',
   product: 'Refrigerante lata',
@@ -702,8 +767,8 @@ export const SEED_ON_CREDIT = {
 } as const;
 
 /**
- * Spec 06 (created while the unit has no customer): two customers and a tab on credit in the open
- * shift, with its drinks delivered, to receive later in any shift.
+ * Spec 06 (created while the unit has no customer): two customers and a tab on credit of the
+ * current day, with its drinks delivered, to receive later in any open register.
  */
 async function seedCredit(
   tx: Prisma.TransactionClient,
@@ -718,7 +783,7 @@ async function seedCredit(
     customers.push(await tx.customer.create({ data: { organizationId, unitId, ...customer } }));
   }
   const customer = customers.find((row) => row.name === SEED_ON_CREDIT.customerName);
-  const shift = await tx.shift.findFirst({ where: { organizationId, unitId, status: 'open' } });
+  const unit = await tx.unit.findUniqueOrThrow({ where: { id: unitId } });
   const product = await tx.product.findFirst({
     where: { organizationId, unitId, name: SEED_ON_CREDIT.product },
     include: { category: true },
@@ -726,24 +791,26 @@ async function seedCredit(
   const final = await tx.workflowStage.findFirst({
     where: { organizationId, unitId, archivedAt: null, isFinal: true },
   });
-  if (!customer || !shift || !product || !final) {
+  const businessDate = unit.businessDate;
+  if (!customer || !businessDate || !product || !final) {
     return;
   }
   const actor =
     cashierId === null
       ? { type: 'system' as const, id: null }
       : { type: 'staff' as const, id: cashierId };
-  const numbered = await tx.shift.update({
-    where: { id: shift.id },
+  const numbered = await tx.unit.update({
+    where: { id: unitId },
     data: { nextTabNumber: { increment: 1 } },
   });
   const now = new Date();
   const tab = await tx.tab.create({
     data: {
       organizationId,
-      shiftId: shift.id,
       unitId,
       number: numbered.nextTabNumber - 1,
+      businessDate,
+      closedBusinessDate: businessDate,
       customerName: SEED_ON_CREDIT.customerName,
       mode: 'open_tab',
       status: 'on_credit',
@@ -758,7 +825,6 @@ async function seedCredit(
     data: {
       organizationId,
       tabId: tab.id,
-      shiftId: shift.id,
       numberInTab: 1,
       status: 'completed',
       createdByType: actor.type,
@@ -800,7 +866,7 @@ if (import.meta.main) {
     const result = await seed(prisma);
     console.log(
       `Seed ok: organização ${SEED.organization.name} (código ${SEED.organization.accessCode}), ` +
-        `unidade com estações, fluxo, cardápio e um turno aberto de exemplo com um caixa, 2 clientes e uma comanda pendurada, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
+        `unidade com estações, fluxo, cardápio, tabela de preço Evento, o Caixa 1 aberto com comandas de exemplo, 2 clientes e uma comanda pendurada, ${result.staffMemberIds.length} colaboradores, dono ${SEED.owner.email}, admin ${SEED.platformAdmin.email}. ` +
         `Senha de desenvolvimento: ${SEED.devPassword}.`,
     );
   } finally {

@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 
 import { MetricsService, resolvePeriod } from '../../src/admin/metrics/metrics.service.js';
+import { dateColumn, todayInSaoPaulo } from '../../src/common/time.js';
 import {
   type AuthContext,
   requireOrganizationId,
@@ -10,21 +11,22 @@ import {
   systemContext,
 } from '../../src/context/request-context.js';
 import type {
-  CashRegisterDetailDto,
   CashRegisterDto,
+  CashRegisterSessionDetailDto,
+  CashRegisterSessionDto,
+  ClosePreviewDto,
   PaymentResultDto,
 } from '../../src/operation/cash.schemas.js';
+import type { ContractedEventDto } from '../../src/operation/events.schemas.js';
 import type {
   ItemChangeDto,
   OrderDto,
-  ShiftDto,
   StationQueueDto,
   TabDto,
   TabSummaryDto,
 } from '../../src/operation/operation.schemas.js';
-import type { TenantDb } from '../../src/prisma/prisma.service.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
-import { PrismaService } from '../../src/prisma/prisma.service.js';
+import { PrismaService, type TenantDb } from '../../src/prisma/prisma.service.js';
 import { errorOf } from '../support/http.js';
 import {
   createTenant,
@@ -54,10 +56,22 @@ interface Crew {
   counter: TestStaff;
   /** Cozinha only. */
   kitchen: TestStaff;
-  shift: ShiftDto;
 }
 
 const ALL_ZERO = { cash: 0, pix: 0, credit_card: 0, debit_card: 0 };
+const METHODS = ['cash', 'pix', 'credit_card', 'debit_card'] as const;
+
+function zeroCounts(cash = 0) {
+  return METHODS.map((method) => ({ method, informedCents: method === 'cash' ? cash : 0 }));
+}
+
+function today(): string {
+  return todayInSaoPaulo().toString();
+}
+
+function yesterday(): Date {
+  return dateColumn(todayInSaoPaulo().subtract({ days: 1 }));
+}
 
 describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   let app: NestExpressApplication;
@@ -76,15 +90,15 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     vi.unstubAllEnvs();
   });
 
-  /** A unit with an open shift where the skewer costs `skewerCents` (shift price, RN-04.06). */
+  /** A unit with "Caixa 1" (closed) where the skewer costs `skewerCents` (normal price). */
   async function crew(label: string, skewerCents = 1000): Promise<Crew> {
     const tenant = await createTenant(platform, label);
     const setup = await setupOperation(platform, tenant);
-    const { stations } = setup;
-    const shift = await ok<ShiftDto>('post', `/units/${tenant.unitId}/shifts`, tenant.ownerAuth, {
-      type: 'direct_sale',
-      prices: [{ productId: setup.products.skewer, priceCents: skewerCents }],
+    await platform.product.update({
+      where: { id: setup.products.skewer },
+      data: { priceCents: skewerCents },
     });
+    const { stations } = setup;
     return {
       setup,
       owner: tenant.ownerAuth,
@@ -93,12 +107,11 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       }),
       counter: await createStaff(platform, tenant, [stations.counter]),
       kitchen: await createStaff(platform, tenant, [stations.kitchen]),
-      shift,
     };
   }
 
   async function ok<T>(
-    method: 'get' | 'post' | 'put' | 'delete',
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
     path: string,
     auth: AuthContext,
     body?: object,
@@ -115,7 +128,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   }
 
   async function fails(
-    method: 'get' | 'post' | 'put' | 'delete',
+    method: 'get' | 'post' | 'put' | 'patch' | 'delete',
     path: string,
     auth: AuthContext,
     body: object | undefined,
@@ -140,16 +153,53 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     };
   }
 
-  function openRegister(c: Crew, openingFloatCents = 10_000, name?: string) {
-    return ok<CashRegisterDto>('post', `/shifts/${c.shift.id}/cash-registers`, c.cashier.auth, {
+  /** Opens `registerId` (default "Caixa 1"); returns the register with its new session. */
+  function openRegister(
+    c: Crew,
+    openingFloatCents = 10_000,
+    registerId = c.setup.register,
+    auth = c.cashier.auth,
+  ) {
+    return ok<CashRegisterDto>('post', `/cash-registers/${registerId}/open`, auth, {
       openingFloatCents,
-      ...(name === undefined ? {} : { name }),
     });
+  }
+
+  function sessionOf(register: CashRegisterDto): CashRegisterSessionDto {
+    if (!register.session) {
+      throw new Error('register without session');
+    }
+    return register.session;
+  }
+
+  /** A new register of the unit, registered by the owner (RN-05.17). */
+  function newRegister(c: Crew, name: string) {
+    return ok<CashRegisterDto>('post', `/units/${c.setup.tenant.unitId}/cash-registers`, c.owner, {
+      name,
+    });
+  }
+
+  function closeSession(c: Crew, sessionId: string, body: object = { counts: zeroCounts() }) {
+    return ok<CashRegisterDto>(
+      'post',
+      `/cash-register-sessions/${sessionId}/close`,
+      c.cashier.auth,
+      body,
+      200,
+    );
+  }
+
+  function session(c: Crew, sessionId: string) {
+    return ok<CashRegisterSessionDetailDto>(
+      'get',
+      `/cash-register-sessions/${sessionId}`,
+      c.cashier.auth,
+    );
   }
 
   /** An open tab with `quantity` skewers, already in `closing` (pedir a conta). */
   async function billedTab(c: Crew, quantity: number, customerName = 'Dona Marta') {
-    const tab = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs`, c.counter.auth, {
+    const tab = await ok<TabDto>('post', `/units/${c.setup.tenant.unitId}/tabs`, c.counter.auth, {
       customerName,
     });
     const order = await ok<OrderDto>('post', `/tabs/${tab.id}/orders`, c.counter.auth, {
@@ -169,8 +219,8 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     return ok<PaymentResultDto>('post', `/tabs/${tabId}/payments`, auth, body);
   }
 
-  function expectedOf(register: CashRegisterDto): Record<string, number> {
-    return Object.fromEntries(register.expected.map((row) => [row.method, row.expectedCents]));
+  function expectedOf(row: CashRegisterSessionDto): Record<string, number> {
+    return Object.fromEntries(row.expected.map((line) => [line.method, line.expectedCents]));
   }
 
   async function auditActions(entityId: string): Promise<string[]> {
@@ -182,9 +232,12 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   }
 
   describe('payments (section 4)', () => {
-    it('CA-05.08, RN-05.06: without an open register the payment is refused', async () => {
+    it('CA-05.08, RN-05.06: without an open register the payment is refused (NO_CASH_REGISTER_OPEN)', async () => {
       const c = await crew('Sem caixa');
+      const opened = await openRegister(c);
       const { tab } = await billedTab(c, 2);
+      // RN-05.28: the tab does not stop the closing and stays open.
+      await closeSession(c, sessionOf(opened).id, { counts: zeroCounts(10_000) });
       await fails(
         'post',
         `/tabs/${tab.id}/payments`,
@@ -205,14 +258,24 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       const pix = await pay(c, tab.id, { method: 'pix', amountCents: 5000 });
       expect(pix.tab).toMatchObject({ status: 'closing', paidCents: 5000, balanceCents: 3000 });
       const cash = await pay(c, tab.id, { method: 'cash', tenderedCents: 3000 });
-      expect(cash.payment).toMatchObject({ amountCents: 3000, changeCents: 0 });
-      expect(cash.tab).toMatchObject({ status: 'paid', paidCents: 8000, balanceCents: 0 });
+      expect(cash.payment).toMatchObject({
+        amountCents: 3000,
+        changeCents: 0,
+        cashRegisterId: c.setup.register,
+        cashRegisterName: 'Caixa 1',
+      });
+      expect(cash.tab).toMatchObject({
+        status: 'paid',
+        paidCents: 8000,
+        balanceCents: 0,
+        closedBusinessDate: today(),
+      });
       expect(cash.tab.closedAt).not.toBeNull();
       expect(cash.tab.payments.map((payment) => payment.method)).toEqual(['pix', 'cash']);
 
       const varal = await ok<{ data: TabSummaryDto[] }>(
         'get',
-        `/shifts/${c.shift.id}/tabs`,
+        `/units/${c.setup.tenant.unitId}/tabs`,
         c.counter.auth,
       );
       expect(varal.data.map((row) => row.id)).not.toContain(tab.id);
@@ -282,7 +345,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     it('RN-05.07, RN-05.11: only a tab in closing is paid; a tab with total zero is not', async () => {
       const c = await crew('Situações');
       await openRegister(c);
-      const tab = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs`, c.counter.auth, {
+      const tab = await ok<TabDto>('post', `/units/${c.setup.tenant.unitId}/tabs`, c.counter.auth, {
         customerName: 'Aberta',
       });
       const order = await ok<OrderDto>('post', `/tabs/${tab.id}/orders`, c.counter.auth, {
@@ -318,11 +381,11 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
     });
 
-    it('RN-05.05: with more than one open register the counter chooses; the register must be of the shift and open', async () => {
+    it('RN-05.05: with more than one open register the counter chooses; the register must be of the unit and open', async () => {
       const c = await crew('Dois caixas');
+      const second = await newRegister(c, 'Caixa 2');
       const first = await openRegister(c);
-      const second = await openRegister(c, 0);
-      expect([first.name, second.name]).toEqual(['Caixa 1', 'Caixa 2']);
+      const secondOpen = await openRegister(c, 0, second.id);
       const { tab } = await billedTab(c, 3);
       const details = await fails(
         'post',
@@ -341,54 +404,23 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         amountCents: 1000,
         cashRegisterId: second.id,
       });
-      expect(paid.payment.cashRegisterId).toBe(second.id);
+      expect(paid.payment).toMatchObject({
+        cashRegisterId: second.id,
+        cashRegisterSessionId: sessionOf(secondOpen).id,
+      });
 
-      // A register of another shift of the same organization is refused.
-      const otherShift = await platform.shift.create({
-        data: {
-          organizationId: c.setup.tenant.organizationId,
-          unitId: c.setup.tenant.unitId,
-          type: 'direct_sale',
-          status: 'closed',
-          openedByType: 'owner',
-          openedAt: new Date(),
-          closedAt: new Date(),
-        },
-      });
-      const foreign = await platform.cashRegister.create({
-        data: {
-          organizationId: c.setup.tenant.organizationId,
-          shiftId: otherShift.id,
-          unitId: c.setup.tenant.unitId,
-          name: 'Antigo',
-          openingFloatCents: 0,
-          openedByType: 'owner',
-          openedAt: new Date(),
-        },
-      });
+      // A register of another unit is refused.
+      const other = await crew('Outra unidade');
       await fails(
         'post',
         `/tabs/${tab.id}/payments`,
         c.counter.auth,
-        { method: 'pix', amountCents: 1000, cashRegisterId: foreign.id },
+        { method: 'pix', amountCents: 1000, cashRegisterId: other.setup.register },
         400,
         'INVALID_CASH_REGISTER',
       );
       // A closed register takes no payment (RN-05.21).
-      await ok<CashRegisterDto>(
-        'post',
-        `/cash-registers/${first.id}/close`,
-        c.cashier.auth,
-        {
-          counts: [
-            { method: 'cash', informedCents: 10_000 },
-            { method: 'pix', informedCents: 0 },
-            { method: 'credit_card', informedCents: 0 },
-            { method: 'debit_card', informedCents: 0 },
-          ],
-        },
-        200,
-      );
+      await closeSession(c, sessionOf(first).id, { counts: zeroCounts(10_000) });
       await fails(
         'post',
         `/tabs/${tab.id}/payments`,
@@ -460,6 +492,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   describe('discount (section 3)', () => {
     it('CA-05.04, RN-05.03: 10% on a subtotal of R$ 92,50 gives a total of R$ 83,25', async () => {
       const c = await crew('Desconto', 925);
+      await openRegister(c);
       const { tab } = await billedTab(c, 10);
       expect(tab.subtotalCents).toBe(9250);
       const discounted = await ok<TabDto>('put', `/tabs/${tab.id}/discount`, c.counter.auth, {
@@ -547,9 +580,10 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   });
 
   describe('reversal (section 4.1)', () => {
-    it('CA-05.05, RN-05.13 to RN-05.15: reversing a payment of a paid tab takes it back to closing with the balance', async () => {
+    it('CA-05.05, CA-05.13, RN-05.13 to RN-05.15: reversing takes a paid tab back to closing; not after the session closed', async () => {
       const c = await crew('Estorno');
       const register = await openRegister(c, 0);
+      const sessionId = sessionOf(register).id;
       const { tab } = await billedTab(c, 3);
       await pay(c, tab.id, { method: 'pix', amountCents: 1000 });
       const cash = await pay(c, tab.id, { method: 'cash', tenderedCents: 5000 });
@@ -579,15 +613,11 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         paidCents: 1000,
         balanceCents: 2000,
         closedAt: null,
+        closedBusinessDate: null,
       });
-      // The payment stays, marked; its value leaves the expected of the register.
+      // The payment stays, marked; its value leaves the expected of the session.
       expect(reversed.tab.payments).toHaveLength(2);
-      const after = await ok<CashRegisterDto>(
-        'get',
-        `/cash-registers/${register.id}`,
-        c.cashier.auth,
-      );
-      expect(expectedOf(after)).toEqual({ ...ALL_ZERO, pix: 1000 });
+      expect(expectedOf(await session(c, sessionId))).toEqual({ ...ALL_ZERO, pix: 1000 });
       await fails(
         'post',
         `/payments/${cash.payment.id}/reverse`,
@@ -598,22 +628,17 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
       expect(await auditActions(cash.payment.id)).toEqual(['payment.received', 'payment.reversed']);
 
-      // RN-05.13: not after the register of the payment closed.
+      // CA-05.13: not after the session of the payment closed, even with another register open.
       const pix = reversed.tab.payments.find((payment) => payment.method === 'pix');
-      await ok<CashRegisterDto>(
-        'post',
-        `/cash-registers/${register.id}/close`,
-        c.cashier.auth,
-        {
-          counts: [
-            { method: 'cash', informedCents: 0 },
-            { method: 'pix', informedCents: 1000 },
-            { method: 'credit_card', informedCents: 0 },
-            { method: 'debit_card', informedCents: 0 },
-          ],
-        },
-        200,
-      );
+      await closeSession(c, sessionId, {
+        counts: [
+          { method: 'cash', informedCents: 0 },
+          { method: 'pix', informedCents: 1000 },
+          { method: 'credit_card', informedCents: 0 },
+          { method: 'debit_card', informedCents: 0 },
+        ],
+      });
+      await openRegister(c, 0);
       await fails(
         'post',
         `/payments/${pix?.id ?? ''}/reverse`,
@@ -657,7 +682,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         200,
       );
       const canceled = await ok<TabDto>('post', `/tabs/${tab.id}/cancel`, c.counter.auth, {}, 200);
-      expect(canceled.status).toBe('canceled');
+      expect(canceled).toMatchObject({ status: 'canceled', closedBusinessDate: today() });
 
       // With an active payment the cancel is refused.
       const other = await billedTab(c, 1, 'Seu João');
@@ -678,10 +703,11 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     it('CA-05.09: payments below the total write neither the order nor the payment', async () => {
       const c = await crew('Paga antes curto');
       await openRegister(c);
-      const tabsBefore = await platform.tab.count({ where: { shiftId: c.shift.id } });
+      const unitId = c.setup.tenant.unitId;
+      const tabsBefore = await platform.tab.count({ where: { unitId } });
       const details = await fails(
         'post',
-        `/shifts/${c.shift.id}/tabs/pay-first`,
+        `/units/${unitId}/tabs/pay-first`,
         c.counter.auth,
         {
           customerName: 'Lucas',
@@ -692,20 +718,18 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         'PAYMENT_INSUFFICIENT',
       );
       expect(details).toMatchObject({ totalCents: 3000, paidCents: 2000 });
-      await expect(platform.tab.count({ where: { shiftId: c.shift.id } })).resolves.toBe(
-        tabsBefore,
-      );
-      await expect(platform.order.count({ where: { shiftId: c.shift.id } })).resolves.toBe(0);
-      await expect(platform.payment.count({ where: { shiftId: c.shift.id } })).resolves.toBe(0);
+      await expect(platform.tab.count({ where: { unitId } })).resolves.toBe(tabsBefore);
+      await expect(platform.order.count({ where: { tab: { unitId } } })).resolves.toBe(0);
+      await expect(platform.payment.count({ where: { tab: { unitId } } })).resolves.toBe(0);
       // CA-04.10: nothing reached the kitchen.
       const queue = await ok<StationQueueDto>(
         'get',
         `/stations/${c.setup.stations.kitchen}/queue`,
         c.kitchen.auth,
       );
-      expect(queue.items).toEqual([]);
+      expect(queue.orders).toEqual([]);
       // The tab number was not consumed either (the transaction rolled back).
-      const next = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs`, c.counter.auth, {
+      const next = await ok<TabDto>('post', `/units/${unitId}/tabs`, c.counter.auth, {
         customerName: 'Depois',
       });
       expect(next.number).toBe(tabsBefore + 1);
@@ -713,9 +737,10 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
 
     it('CA-04.10: the tab is born paid and only then its items reach the kitchen; pix + cash with change', async () => {
       const c = await crew('Paga antes');
+      const unitId = c.setup.tenant.unitId;
       await fails(
         'post',
-        `/shifts/${c.shift.id}/tabs/pay-first`,
+        `/units/${unitId}/tabs/pay-first`,
         c.counter.auth,
         {
           customerName: 'Lucas',
@@ -726,7 +751,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         'NO_CASH_REGISTER_OPEN',
       );
       await openRegister(c);
-      const tab = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs/pay-first`, c.counter.auth, {
+      const tab = await ok<TabDto>('post', `/units/${unitId}/tabs/pay-first`, c.counter.auth, {
         customerName: 'Lucas',
         items: [skewers(c, 3)],
         payments: [
@@ -740,6 +765,8 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         totalCents: 3000,
         paidCents: 3000,
         balanceCents: 0,
+        businessDate: today(),
+        closedBusinessDate: today(),
       });
       expect(
         tab.payments.map((payment) => [payment.method, payment.amountCents, payment.changeCents]),
@@ -752,7 +779,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         `/stations/${c.setup.stations.kitchen}/queue`,
         c.kitchen.auth,
       );
-      expect(queue.items.map((item) => item.tabId)).toEqual([tab.id]);
+      expect(queue.orders.map((order) => order.tabId)).toEqual([tab.id]);
       expect(await auditActions(tab.id)).toEqual(['tab.opened', 'tab.paid']);
 
       // RN-04.11: no other order and no reopening.
@@ -767,7 +794,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       // A Pix above the total is refused (RN-05.08).
       await fails(
         'post',
-        `/shifts/${c.shift.id}/tabs/pay-first`,
+        `/units/${unitId}/tabs/pay-first`,
         c.counter.auth,
         {
           customerName: 'Ana',
@@ -782,11 +809,16 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     it('RN-04.28, RN-05.14: canceling an item after paying is a reversal, then cancel and receive again', async () => {
       const c = await crew('Paga antes estorno');
       await openRegister(c);
-      const tab = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs/pay-first`, c.counter.auth, {
-        customerName: 'Lucas',
-        items: [skewers(c, 2), { productId: c.setup.products.soda, quantity: 1 }],
-        payments: [{ method: 'pix', amountCents: 2600 }],
-      });
+      const tab = await ok<TabDto>(
+        'post',
+        `/units/${c.setup.tenant.unitId}/tabs/pay-first`,
+        c.counter.auth,
+        {
+          customerName: 'Lucas',
+          items: [skewers(c, 2), { productId: c.setup.products.soda, quantity: 1 }],
+          payments: [{ method: 'pix', amountCents: 2600 }],
+        },
+      );
       const soda = tab.orders[0]?.items.find((item) => item.productId === c.setup.products.soda);
       const payment = tab.payments[0];
       if (!soda || !payment) {
@@ -823,52 +855,130 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     });
   });
 
-  describe('cash registers (section 5)', () => {
+  describe('cash registers of the unit (section 5.1)', () => {
+    it('RN-05.17, RN-05.27, CA-05.14: the owner registers, renames and deactivates; not an open one nor the last active one', async () => {
+      const c = await crew('Cadastro de caixas');
+      const unitId = c.setup.tenant.unitId;
+      await fails(
+        'post',
+        `/units/${unitId}/cash-registers`,
+        c.cashier.auth,
+        { name: 'Balcão' },
+        403,
+        'FORBIDDEN',
+      );
+      const balcao = await newRegister(c, 'Balcão');
+      expect(balcao).toMatchObject({ name: 'Balcão', active: true, session: null, sortOrder: 2 });
+      await fails(
+        'post',
+        `/units/${unitId}/cash-registers`,
+        c.owner,
+        { name: 'caixa 1' },
+        409,
+        'CASH_REGISTER_NAME_TAKEN',
+      );
+      const renamed = await ok<CashRegisterDto>('patch', `/cash-registers/${balcao.id}`, c.owner, {
+        name: 'Balcão de fora',
+      });
+      expect(renamed.name).toBe('Balcão de fora');
+      expect(await auditActions(balcao.id)).toEqual([
+        'cash_register.created',
+        'cash_register.updated',
+      ]);
+
+      // CA-05.14: an open register is not deactivated.
+      await openRegister(c, 0, balcao.id);
+      await fails(
+        'patch',
+        `/cash-registers/${balcao.id}`,
+        c.owner,
+        { active: false },
+        409,
+        'CASH_REGISTER_OPEN',
+      );
+      // Caixa 1 (closed) is deactivated; then Balcão is the last active one.
+      const inactive = await ok<CashRegisterDto>(
+        'patch',
+        `/cash-registers/${c.setup.register}`,
+        c.owner,
+        { active: false },
+      );
+      expect(inactive.active).toBe(false);
+      const balcaoNow = await ok<{ data: CashRegisterDto[] }>(
+        'get',
+        `/units/${unitId}/cash-registers`,
+        c.owner,
+      );
+      const session = balcaoNow.data.find((row) => row.id === balcao.id)?.session;
+      await closeSession(c, session?.id ?? '');
+      await fails(
+        'patch',
+        `/cash-registers/${balcao.id}`,
+        c.owner,
+        { active: false },
+        409,
+        'LAST_ACTIVE_CASH_REGISTER',
+      );
+      // An inactive register is not opened (RN-05.27).
+      await fails(
+        'post',
+        `/cash-registers/${c.setup.register}/open`,
+        c.cashier.auth,
+        { openingFloatCents: 0 },
+        409,
+        'CASH_REGISTER_INACTIVE',
+      );
+      // Staff lists only the active ones; the owner sees all.
+      const staffList = await ok<{ data: CashRegisterDto[] }>(
+        'get',
+        `/units/${unitId}/cash-registers`,
+        c.cashier.auth,
+      );
+      expect(staffList.data.map((row) => row.id)).toEqual([balcao.id]);
+    });
+  });
+
+  describe('opening and closing (sections 5.2 to 5.4)', () => {
     it('RN-05.16: only the owner and staff who operate cash open, move and close registers', async () => {
       const c = await crew('Permissões do caixa');
       await fails(
         'post',
-        `/shifts/${c.shift.id}/cash-registers`,
+        `/cash-registers/${c.setup.register}/open`,
         c.counter.auth,
         { openingFloatCents: 0 },
         403,
         'FORBIDDEN',
       );
-      const register = await ok<CashRegisterDto>(
-        'post',
-        `/shifts/${c.shift.id}/cash-registers`,
-        c.owner,
-        { openingFloatCents: 0, name: 'Gaveta' },
-      );
-      expect(register).toMatchObject({ name: 'Gaveta', openedBy: { type: 'owner' } });
-      await fails(
-        'post',
-        `/shifts/${c.shift.id}/cash-registers`,
-        c.cashier.auth,
-        { openingFloatCents: 0, name: 'gaveta' },
-        409,
-        'CASH_REGISTER_NAME_TAKEN',
-      );
+      const register = await openRegister(c, 0, c.setup.register, c.owner);
+      const sessionId = sessionOf(register).id;
+      expect(register.session).toMatchObject({
+        status: 'open',
+        name: 'Caixa 1',
+        openedBy: { type: 'owner' },
+        businessDate: today(),
+      });
       for (const [method, path, body] of [
-        ['get', `/cash-registers/${register.id}`, undefined],
+        ['get', `/cash-register-sessions/${sessionId}`, undefined],
+        ['get', `/cash-register-sessions/${sessionId}/close-preview`, undefined],
         [
           'post',
-          `/cash-registers/${register.id}/movements`,
+          `/cash-register-sessions/${sessionId}/movements`,
           { type: 'deposit', amountCents: 100, reason: 'Troco' },
         ],
+        ['post', `/cash-register-sessions/${sessionId}/close`, { counts: zeroCounts() }],
       ] as const) {
         await fails(method, path, c.counter.auth, body, 403, 'FORBIDDEN');
       }
       // The counter lists the registers (to choose one, RN-05.05); the kitchen does not.
       const list = await ok<{ data: CashRegisterDto[] }>(
         'get',
-        `/shifts/${c.shift.id}/cash-registers`,
+        `/units/${c.setup.tenant.unitId}/cash-registers`,
         c.counter.auth,
       );
-      expect(list.data.map((row) => row.id)).toEqual([register.id]);
+      expect(list.data.map((row) => row.id)).toEqual([c.setup.register]);
       await fails(
         'get',
-        `/shifts/${c.shift.id}/cash-registers`,
+        `/units/${c.setup.tenant.unitId}/cash-registers`,
         c.kitchen.auth,
         undefined,
         403,
@@ -876,14 +986,126 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
     });
 
+    it('CA-05.10, RN-05.23: "Caixa 1" already open is refused; "Caixa 2" opens at the same time', async () => {
+      const c = await crew('Dois abertos');
+      const second = await newRegister(c, 'Caixa 2');
+      await openRegister(c);
+      const details = await fails(
+        'post',
+        `/cash-registers/${c.setup.register}/open`,
+        c.cashier.auth,
+        { openingFloatCents: 0 },
+        409,
+        'CASH_REGISTER_ALREADY_OPEN',
+      );
+      expect(details.sessionId).toEqual(expect.any(String));
+      const opened = await openRegister(c, 500, second.id);
+      expect(opened.session).toMatchObject({ status: 'open', openingFloatCents: 500 });
+      await expect(
+        platform.cashRegisterSession.count({
+          where: { unitId: c.setup.tenant.unitId, status: 'open' },
+        }),
+      ).resolves.toBe(2);
+    });
+
+    it('RN-05.24, CA-02.05: inactive unit and suspended organization do not open; an open register keeps working and closes', async () => {
+      const c = await crew('Suspensa');
+      const register = await openRegister(c);
+      const { tab } = await billedTab(c, 1);
+      await platform.organization.update({
+        where: { id: c.setup.tenant.organizationId },
+        data: { subscriptionStatus: 'suspended' },
+      });
+      const second = await newRegister(c, 'Caixa 2');
+      await fails(
+        'post',
+        `/cash-registers/${second.id}/open`,
+        c.cashier.auth,
+        { openingFloatCents: 0 },
+        409,
+        'ORGANIZATION_SUSPENDED',
+      );
+      // The open register still receives and closes (RN-01.01).
+      await pay(c, tab.id, { method: 'pix', amountCents: 1000 });
+      await closeSession(c, sessionOf(register).id, {
+        counts: [
+          { method: 'cash', informedCents: 10_000 },
+          { method: 'pix', informedCents: 1000 },
+          { method: 'credit_card', informedCents: 0 },
+          { method: 'debit_card', informedCents: 0 },
+        ],
+      });
+
+      const d = await crew('Unidade inativa');
+      await platform.unit.update({ where: { id: d.setup.tenant.unitId }, data: { active: false } });
+      await fails(
+        'post',
+        `/cash-registers/${d.setup.register}/open`,
+        d.owner,
+        { openingFloatCents: 0 },
+        409,
+        'UNIT_INACTIVE',
+      );
+    });
+
+    it('CA-05.12: opening again creates a new session with its own float; new payments go to it and the old one does not change', async () => {
+      const c = await crew('Reabrir');
+      const first = await openRegister(c, 5_000);
+      const firstSession = sessionOf(first).id;
+      const a = await billedTab(c, 2, 'Almoço');
+      await pay(c, a.tab.id, { method: 'pix', amountCents: 2000 });
+      await closeSession(c, firstSession, {
+        counts: [
+          { method: 'cash', informedCents: 5_000 },
+          { method: 'pix', informedCents: 2_000 },
+          { method: 'credit_card', informedCents: 0 },
+          { method: 'debit_card', informedCents: 0 },
+        ],
+      });
+      const before = await session(c, firstSession);
+
+      const again = await openRegister(c, 3_000);
+      const secondSession = sessionOf(again).id;
+      expect(secondSession).not.toBe(firstSession);
+      expect(again.session).toMatchObject({ openingFloatCents: 3_000, status: 'open' });
+      const b = await billedTab(c, 1, 'Jantar');
+      const paid = await pay(c, b.tab.id, { method: 'cash', tenderedCents: 1000 });
+      expect(paid.payment.cashRegisterSessionId).toBe(secondSession);
+      expect(await session(c, firstSession)).toEqual(before);
+      // RN-05.23: the next opening suggests the float of the previous one.
+      const list = await ok<{ data: CashRegisterDto[] }>(
+        'get',
+        `/units/${c.setup.tenant.unitId}/cash-registers`,
+        c.cashier.auth,
+      );
+      expect(list.data[0]).toMatchObject({ suggestedOpeningFloatCents: 3_000 });
+    });
+
+    it('RN-05.26: a session of an earlier day shows "aberto desde ontem"', async () => {
+      const c = await crew('Esquecido');
+      const register = await openRegister(c);
+      expect(register.session?.openSinceEarlierDay).toBe(false);
+      await platform.cashRegisterSession.update({
+        where: { id: sessionOf(register).id },
+        data: { businessDate: yesterday() },
+      });
+      const list = await ok<{ data: CashRegisterDto[] }>(
+        'get',
+        `/units/${c.setup.tenant.unitId}/cash-registers`,
+        c.cashier.auth,
+      );
+      expect(list.data[0]?.session?.openSinceEarlierDay).toBe(true);
+    });
+
     it('CA-05.06, RN-05.18, RN-05.19: float R$ 100, R$ 300 in cash, withdrawal R$ 200 and deposit R$ 50 expect R$ 250', async () => {
       const c = await crew('Esperado', 10_000);
       const register = await openRegister(c, 10_000);
+      const sessionId = sessionOf(register).id;
       const { tab } = await billedTab(c, 3);
       await pay(c, tab.id, { method: 'cash', tenderedCents: 30_000 });
       await fails(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'withdrawal', amountCents: 40_001, reason: 'Banco' },
         409,
@@ -891,21 +1113,21 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
       await fails(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'withdrawal', amountCents: 100 },
         400,
         'VALIDATION_FAILED',
       );
-      const withdrawal = await ok<CashRegisterDetailDto>(
+      const withdrawal = await ok<CashRegisterSessionDetailDto>(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'withdrawal', amountCents: 20_000, reason: 'Sangria para o cofre' },
       );
-      const deposit = await ok<CashRegisterDetailDto>(
+      const deposit = await ok<CashRegisterSessionDetailDto>(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'deposit', amountCents: 5_000, reason: 'Mais troco', version: withdrawal.version },
       );
@@ -919,10 +1141,10 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       });
       expect(deposit.movements.map((movement) => movement.type)).toEqual(['withdrawal', 'deposit']);
       expect(deposit.payments).toHaveLength(1);
-      // An old version of the register is a conflict.
+      // An old version of the session is a conflict.
       await fails(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'deposit', amountCents: 100, reason: 'Troco', version: withdrawal.version },
         409,
@@ -935,6 +1157,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     it('CA-05.07, RN-05.20, RN-05.21: a difference needs a note; it is stored per method, credit and debit apart', async () => {
       const c = await crew('Conferência');
       const register = await openRegister(c, 5_000);
+      const sessionId = sessionOf(register).id;
       const { tab } = await billedTab(c, 6);
       await pay(c, tab.id, { method: 'credit_card', amountCents: 2000 });
       await pay(c, tab.id, { method: 'debit_card', amountCents: 1500 });
@@ -948,7 +1171,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       ];
       const details = await fails(
         'post',
-        `/cash-registers/${register.id}/close`,
+        `/cash-register-sessions/${sessionId}/close`,
         c.cashier.auth,
         { counts },
         400,
@@ -962,39 +1185,35 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       ]);
       await fails(
         'post',
-        `/cash-registers/${register.id}/close`,
+        `/cash-register-sessions/${sessionId}/close`,
         c.cashier.auth,
         { counts: counts.slice(0, 3), note: 'x' },
         400,
         'VALIDATION_FAILED',
       );
-      const closed = await ok<CashRegisterDto>(
-        'post',
-        `/cash-registers/${register.id}/close`,
-        c.cashier.auth,
-        { counts, note: 'Faltou R$ 1,00 de troco' },
-        200,
-      );
-      expect(closed).toMatchObject({
+      const closed = await closeSession(c, sessionId, { counts, note: 'Faltou R$ 1,00 de troco' });
+      expect(closed.session).toMatchObject({
+        id: sessionId,
         status: 'closed',
         closingNote: 'Faltou R$ 1,00 de troco',
         closedBy: { type: 'staff', id: c.cashier.id },
+        differenceCents: -100,
       });
       // RN-05.22: each count also shows the settlements of tabs on credit (none here).
-      expect(closed.counts).toEqual(
+      expect(closed.session?.counts).toEqual(
         (details.counts as object[]).map((row) => ({ ...row, creditSettlementsCents: 0 })),
       );
       await expect(
-        platform.cashRegisterCount.count({ where: { cashRegisterId: register.id } }),
+        platform.cashRegisterCount.count({ where: { cashRegisterSessionId: sessionId } }),
       ).resolves.toBe(4);
-      expect(await auditActions(register.id)).toEqual([
+      expect(await auditActions(sessionId)).toEqual([
         'cash_register.opened',
         'cash_register.closed',
       ]);
       // RN-05.21: closed for good.
       await fails(
         'post',
-        `/cash-registers/${register.id}/movements`,
+        `/cash-register-sessions/${sessionId}/movements`,
         c.cashier.auth,
         { type: 'deposit', amountCents: 100, reason: 'Troco' },
         409,
@@ -1002,7 +1221,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
       await fails(
         'post',
-        `/cash-registers/${register.id}/close`,
+        `/cash-register-sessions/${sessionId}/close`,
         c.cashier.auth,
         { counts, note: 'De novo' },
         409,
@@ -1010,57 +1229,105 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       );
     });
 
-    it('RN-04.07: the shift closes only with every register closed (details.cashRegisters)', async () => {
-      const c = await crew('Fechar turno');
+    it('CA-05.11, RN-05.28: closing with two open tabs records 2 pending with their total; the tabs stay open', async () => {
+      const c = await crew('Pendentes');
       const register = await openRegister(c, 0);
-      const details = await fails(
-        'post',
-        `/shifts/${c.shift.id}/close`,
-        c.owner,
-        undefined,
-        409,
-        'SHIFT_HAS_PENDING_ITEMS',
-      );
-      expect(details).toEqual({ tabs: [], cashRegisters: [{ id: register.id, name: 'Caixa 1' }] });
-      await ok<CashRegisterDto>(
-        'post',
-        `/cash-registers/${register.id}/close`,
+      const sessionId = sessionOf(register).id;
+      const a = await billedTab(c, 2, 'Mesa 1');
+      const b = await ok<TabDto>('post', `/units/${c.setup.tenant.unitId}/tabs`, c.counter.auth, {
+        customerName: 'Mesa 2',
+      });
+      await ok<OrderDto>('post', `/tabs/${b.id}/orders`, c.counter.auth, {
+        items: [skewers(c, 1)],
+      });
+      const preview = await ok<ClosePreviewDto>(
+        'get',
+        `/cash-register-sessions/${sessionId}/close-preview`,
         c.cashier.auth,
-        {
-          counts: ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
-            method,
-            informedCents: 0,
-          })),
-        },
-        200,
       );
-      const closed = await ok<ShiftDto>(
-        'post',
-        `/shifts/${c.shift.id}/close`,
-        c.owner,
-        undefined,
-        200,
+      expect(preview.pendingTabs.map((tab) => tab.number)).toEqual([a.tab.number, b.number]);
+      expect(preview.pendingTabsTotalCents).toBe(3000);
+      expect(preview.lastOpenRegister).toBe(true);
+      const closed = await closeSession(c, sessionId, {
+        counts: zeroCounts(),
+        finishPendingItems: false,
+      });
+      expect(closed.session).toMatchObject({ pendingTabsCount: 2, pendingTabsTotalCents: 3000 });
+      const tabs = await platform.tab.findMany({
+        where: { id: { in: [a.tab.id, b.id] } },
+        orderBy: { number: 'asc' },
+      });
+      expect(tabs.map((tab) => tab.status)).toEqual(['closing', 'open']);
+    });
+
+    it('RN-05.29, RN-04.08: closing the last register shows the items in preparation and the event; finishEvent finishes it', async () => {
+      const c = await crew('Último caixa');
+      const unitId = c.setup.tenant.unitId;
+      const second = await newRegister(c, 'Caixa 2');
+      const first = await openRegister(c, 0);
+      const other = await openRegister(c, 0, second.id);
+      const event = await ok<ContractedEventDto>('post', `/units/${unitId}/events`, c.owner, {
+        contractorName: 'Casamento Ana e Leo',
+        startsOn: today(),
+        modality: 'fixed_fee',
+      });
+      await ok<ContractedEventDto>('post', `/events/${event.id}/start`, c.cashier.auth, {}, 200);
+      const tab = await ok<TabDto>('post', `/units/${unitId}/tabs`, c.counter.auth, {
+        customerName: 'Convidado',
+      });
+      await ok<OrderDto>('post', `/tabs/${tab.id}/orders`, c.counter.auth, {
+        items: [skewers(c, 3)],
+      });
+
+      // Not the last register: nothing about items nor the event.
+      const notLast = await ok<ClosePreviewDto>(
+        'get',
+        `/cash-register-sessions/${sessionOf(first).id}/close-preview`,
+        c.cashier.auth,
       );
-      expect(closed.status).toBe('closed');
-      // No register opens in a closed shift.
-      await fails(
-        'post',
-        `/shifts/${c.shift.id}/cash-registers`,
-        c.owner,
-        { openingFloatCents: 0 },
-        409,
-        'SHIFT_CLOSED',
+      expect(notLast).toMatchObject({
+        lastOpenRegister: false,
+        itemsInProgress: 0,
+        eventInProgress: null,
+      });
+      await closeSession(c, sessionOf(first).id, { counts: zeroCounts(), finishEvent: true });
+      await expect(
+        platform.contractedEvent.findUniqueOrThrow({ where: { id: event.id } }),
+      ).resolves.toMatchObject({ status: 'in_progress' });
+
+      const last = await ok<ClosePreviewDto>(
+        'get',
+        `/cash-register-sessions/${sessionOf(other).id}/close-preview`,
+        c.cashier.auth,
       );
+      expect(last).toMatchObject({
+        lastOpenRegister: true,
+        itemsInProgress: 3,
+        eventInProgress: { id: event.id, contractorName: 'Casamento Ana e Leo' },
+      });
+      await closeSession(c, sessionOf(other).id, {
+        counts: zeroCounts(),
+        finishEvent: true,
+        finishPendingItems: false,
+      });
+      await expect(
+        platform.contractedEvent.findUniqueOrThrow({ where: { id: event.id } }),
+      ).resolves.toMatchObject({ status: 'finished' });
+      // finishPendingItems false: the items stay in preparation.
+      await expect(
+        platform.orderItem.count({ where: { tabId: tab.id, stationId: { not: null } } }),
+      ).resolves.toBe(1);
     });
 
     it('idempotency: a movement sent again with the same key is not duplicated', async () => {
       const c = await crew('Movimento reenviado');
       const register = await openRegister(c, 0);
+      const sessionId = sessionOf(register).id;
       const key = crypto.randomUUID();
       for (let attempt = 0; attempt < 2; attempt++) {
-        await ok<CashRegisterDetailDto>(
+        await ok<CashRegisterSessionDetailDto>(
           'post',
-          `/cash-registers/${register.id}/movements`,
+          `/cash-register-sessions/${sessionId}/movements`,
           c.cashier.auth,
           { type: 'deposit', amountCents: 1000, reason: 'Troco' },
           201,
@@ -1068,7 +1335,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         );
       }
       await expect(
-        platform.cashMovement.count({ where: { cashRegisterId: register.id } }),
+        platform.cashMovement.count({ where: { cashRegisterSessionId: sessionId } }),
       ).resolves.toBe(1);
     });
   });
@@ -1108,7 +1375,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
   });
 
   describe('admin metrics (spec 02, section 6)', () => {
-    it('counts the paid tabs, their value (with discount) and the average ticket', async () => {
+    it('counts the paid tabs, their value (with discount), the average ticket and the days of operation', async () => {
       const c = await crew('Métricas pagas', 925);
       await openRegister(c, 0);
       const { tab } = await billedTab(c, 10);
@@ -1120,7 +1387,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       await pay(c, tab.id, { method: 'pix', amountCents: 8325 });
       const second = await ok<TabDto>(
         'post',
-        `/shifts/${c.shift.id}/tabs/pay-first`,
+        `/units/${c.setup.tenant.unitId}/tabs/pay-first`,
         c.counter.auth,
         {
           customerName: 'Lucas',
@@ -1134,7 +1401,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       const metrics = app.get(MetricsService);
       const usage = await metrics.organizations(resolvePeriod({}), 'name', 'asc');
       const row = usage.data.find((item) => item.organizationId === c.setup.tenant.organizationId);
-      expect(row).toMatchObject({ tabs: 2, soldCents: 8325 + 1200, shifts: 0 });
+      expect(row).toMatchObject({ tabs: 2, soldCents: 8325 + 1200, operationDays: 1 });
       const overview = await metrics.overview(resolvePeriod({}));
       expect(overview.tabs).toBeGreaterThanOrEqual(2);
       expect(overview.averageTicketCents).toBe(Math.round(overview.soldCents / overview.tabs));
@@ -1145,14 +1412,16 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     let a: Crew;
     let b: Crew;
     let ctx: IsolationContext;
-    let register: CashRegisterDto;
+    let sessionId: string;
     let payment: PaymentResultDto;
     let tabId: string;
 
     beforeAll(async () => {
       a = await crew('Caixa A');
       b = await crew('Caixa B');
-      register = await openRegister(a, 0);
+      const register = await openRegister(a, 0);
+      sessionId = sessionOf(register).id;
+      await openRegister(b, 0);
       const { tab } = await billedTab(a, 2);
       tabId = tab.id;
       payment = await pay(a, tab.id, { method: 'pix', amountCents: 500 });
@@ -1160,7 +1429,14 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
     });
 
     it('organization B gets 404 on every route with ids of A, and changes nothing', async () => {
-      const routes: { method: 'get' | 'post' | 'put' | 'delete'; path: string; body?: object }[] = [
+      const unitA = a.setup.tenant.unitId;
+      const routes: {
+        method: 'get' | 'post' | 'put' | 'patch' | 'delete';
+        path: string;
+        body?: object;
+        /** Owner-only routes answer 403 to staff before looking at the id. */
+        ownerOnly?: boolean;
+      }[] = [
         {
           method: 'put',
           path: `/tabs/${tabId}/discount`,
@@ -1175,36 +1451,43 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
         { method: 'post', path: `/payments/${payment.payment.id}/reverse`, body: { reason: 'x' } },
         {
           method: 'post',
-          path: `/shifts/${a.shift.id}/tabs/pay-first`,
+          path: `/units/${unitA}/tabs/pay-first`,
           body: { customerName: 'x', items: [skewers(a, 1)], payments: [] },
         },
+        { method: 'get', path: `/units/${unitA}/cash-registers` },
         {
           method: 'post',
-          path: `/shifts/${a.shift.id}/cash-registers`,
+          path: `/units/${unitA}/cash-registers`,
+          body: { name: 'Invasor' },
+          ownerOnly: true,
+        },
+        {
+          method: 'patch',
+          path: `/cash-registers/${a.setup.register}`,
+          body: { name: 'x' },
+          ownerOnly: true,
+        },
+        {
+          method: 'post',
+          path: `/cash-registers/${a.setup.register}/open`,
           body: { openingFloatCents: 0 },
         },
-        { method: 'get', path: `/shifts/${a.shift.id}/cash-registers` },
-        { method: 'get', path: `/cash-registers/${register.id}` },
+        { method: 'get', path: `/cash-register-sessions/${sessionId}` },
+        { method: 'get', path: `/cash-register-sessions/${sessionId}/close-preview` },
         {
           method: 'post',
-          path: `/cash-registers/${register.id}/movements`,
+          path: `/cash-register-sessions/${sessionId}/movements`,
           body: { type: 'deposit', amountCents: 1, reason: 'x' },
         },
         {
           method: 'post',
-          path: `/cash-registers/${register.id}/close`,
-          body: {
-            counts: ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
-              method,
-              informedCents: 0,
-            })),
-            note: 'x',
-          },
+          path: `/cash-register-sessions/${sessionId}/close`,
+          body: { counts: zeroCounts(), note: 'x' },
         },
-        { method: 'get', path: `/units/${a.setup.tenant.unitId}/workflow` },
+        { method: 'get', path: `/units/${unitA}/workflow` },
       ];
       for (const route of routes) {
-        for (const auth of [b.owner, b.cashier.auth]) {
+        for (const auth of route.ownerOnly === true ? [b.owner] : [b.owner, b.cashier.auth]) {
           await expectNotFoundForOtherTenant(app, {
             method: route.method,
             path: `${API}${route.path}`,
@@ -1215,40 +1498,41 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       }
       await expect(platform.payment.count({ where: { tabId } })).resolves.toBe(1);
       await expect(
-        platform.cashRegister.findUniqueOrThrow({ where: { id: register.id } }),
+        platform.cashRegisterSession.findUniqueOrThrow({ where: { id: sessionId } }),
       ).resolves.toMatchObject({ status: 'open' });
+      await expect(
+        platform.cashRegister.findUniqueOrThrow({ where: { id: a.setup.register } }),
+      ).resolves.toMatchObject({ name: 'Caixa 1' });
       await expect(platform.tab.findUniqueOrThrow({ where: { id: tabId } })).resolves.toMatchObject(
-        {
-          discountType: null,
-        },
+        { discountType: null },
       );
     });
 
-    async function closedShift(db: TenantDb, tenant: Tenant) {
-      return db.shift.create({
+    async function registerOf(db: TenantDb, tenant: Tenant) {
+      return db.cashRegister.create({
         data: {
           organizationId: requireOrganizationId(),
           unitId: tenant.unitId,
-          type: 'direct_sale',
-          status: 'closed',
-          openedByType: 'owner',
-          openedAt: new Date(),
-          closedAt: new Date(),
+          name: `Caixa ${crypto.randomUUID().slice(0, 8)}`,
+          sortOrder: 9,
         },
       });
     }
 
-    async function registerOf(db: TenantDb, tenant: Tenant) {
-      const shift = await closedShift(db, tenant);
-      return db.cashRegister.create({
+    async function sessionRowOf(db: TenantDb, tenant: Tenant) {
+      const register = await registerOf(db, tenant);
+      return db.cashRegisterSession.create({
         data: {
           organizationId: requireOrganizationId(),
-          shiftId: shift.id,
+          cashRegisterId: register.id,
           unitId: tenant.unitId,
-          name: 'Caixa',
+          businessDate: dateColumn(todayInSaoPaulo()),
+          status: 'closed',
           openingFloatCents: 0,
           openedByType: 'owner',
           openedAt: new Date(),
+          closedByType: 'owner',
+          closedAt: new Date(),
         },
       });
     }
@@ -1260,15 +1544,22 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       update: { name: 'Invadido' },
     });
 
+    describeTenantIsolation('CashRegisterSession', {
+      context: () => ctx,
+      delegate: (db) => db.cashRegisterSession,
+      create: (db, tenant) => sessionRowOf(db, tenant),
+      update: { closingNote: 'Invadido' },
+    });
+
     describeTenantIsolation('CashMovement', {
       context: () => ctx,
       delegate: (db) => db.cashMovement,
       create: async (db, tenant) => {
-        const cashRegister = await registerOf(db, tenant);
+        const row = await sessionRowOf(db, tenant);
         return db.cashMovement.create({
           data: {
             organizationId: requireOrganizationId(),
-            cashRegisterId: cashRegister.id,
+            cashRegisterSessionId: row.id,
             type: 'deposit',
             amountCents: 100,
             reason: 'Troco',
@@ -1283,11 +1574,11 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       context: () => ctx,
       delegate: (db) => db.cashRegisterCount,
       create: async (db, tenant) => {
-        const cashRegister = await registerOf(db, tenant);
+        const row = await sessionRowOf(db, tenant);
         return db.cashRegisterCount.create({
           data: {
             organizationId: requireOrganizationId(),
-            cashRegisterId: cashRegister.id,
+            cashRegisterSessionId: row.id,
             method: 'pix',
             expectedCents: 0,
             informedCents: 0,
@@ -1302,13 +1593,14 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       context: () => ctx,
       delegate: (db) => db.payment,
       create: async (db, tenant) => {
-        const cashRegister = await registerOf(db, tenant);
+        const row = await sessionRowOf(db, tenant);
         const tab = await db.tab.create({
           data: {
             organizationId: requireOrganizationId(),
-            shiftId: cashRegister.shiftId,
             unitId: tenant.unitId,
             number: 1,
+            businessDate: row.businessDate,
+            closedBusinessDate: row.businessDate,
             customerName: 'Cliente',
             mode: 'open_tab',
             status: 'paid',
@@ -1319,8 +1611,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
           data: {
             organizationId: requireOrganizationId(),
             tabId: tab.id,
-            shiftId: cashRegister.shiftId,
-            cashRegisterId: cashRegister.id,
+            cashRegisterSessionId: row.id,
             method: 'pix',
             amountCents: 100,
             receivedByType: 'owner',
@@ -1330,7 +1621,7 @@ describe.skipIf(!databaseUrl)('closing and cash registers (spec 05)', () => {
       update: { reversalReason: null },
     });
 
-    it('the tenant client never reads payments of another organization in raw totals', async () => {
+    it('the tenant client never reads payments of another organization', async () => {
       const rows = await runWithContext(systemContext({ auth: b.owner }), async () =>
         app.get(PrismaService).db.payment.findMany({ where: { tabId } }),
       );

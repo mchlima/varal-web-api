@@ -6,6 +6,7 @@ import { requireOrganizationId } from '../../src/context/request-context.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { type AdminClient, adminClient } from '../support/admin-kit.js';
+import { setupOperation } from '../support/operation-kit.js';
 import {
   createTenant,
   describeTenantIsolation,
@@ -121,7 +122,7 @@ describe.skipIf(!databaseUrl)(
       expect((byEntity.body as { data: unknown[] }).data).toHaveLength(1);
     });
 
-    it('metrics: organizations by situation and the usage table (shifts and tabs come with spec 04)', async () => {
+    it('metrics: organizations by situation, days of operation (spec 02, section 6) and the usage table', async () => {
       const tenant = await createTenant(platform, 'Métricas');
       await platform.session.create({
         data: {
@@ -134,32 +135,123 @@ describe.skipIf(!databaseUrl)(
           lastUsedAt: new Date('2026-09-15T12:00:00Z'),
         },
       });
+      // A period of 2020, far from the data of the other tests: two registers open on 06/01 (one
+      // day of operation) and one on 15/01, and a tab of R$ 12,00 paid on 15/01.
+      const { organizationId, unitId } = tenant;
+      const setup = await setupOperation(platform, tenant);
+      const second = await platform.cashRegister.create({
+        data: { organizationId, unitId, name: 'Balcão', sortOrder: 2 },
+      });
+      const day = (value: string) => new Date(`${value}T00:00:00Z`);
+      for (const [registerId, businessDate] of [
+        [setup.register, '2020-01-06'],
+        [second.id, '2020-01-06'],
+        [setup.register, '2020-01-15'],
+      ] as const) {
+        await platform.cashRegisterSession.create({
+          data: {
+            organizationId,
+            unitId,
+            cashRegisterId: registerId,
+            businessDate: day(businessDate),
+            status: 'closed',
+            openingFloatCents: 0,
+            openedByType: 'system',
+            openedAt: new Date(`${businessDate}T20:00:00Z`),
+            closedByType: 'system',
+            closedAt: new Date(`${businessDate}T23:00:00Z`),
+          },
+        });
+      }
+      const tab = await platform.tab.create({
+        data: {
+          organizationId,
+          unitId,
+          number: 1,
+          businessDate: day('2020-01-15'),
+          closedBusinessDate: day('2020-01-15'),
+          customerName: 'Mesa',
+          mode: 'open_tab',
+          status: 'paid',
+          openedByType: 'system',
+          closedAt: new Date('2020-01-15T22:00:00Z'),
+        },
+      });
+      const order = await platform.order.create({
+        data: {
+          organizationId,
+          tabId: tab.id,
+          numberInTab: 1,
+          status: 'completed',
+          createdByType: 'system',
+          sentAt: new Date('2020-01-15T21:00:00Z'),
+          completedAt: new Date('2020-01-15T21:30:00Z'),
+        },
+      });
+      await platform.orderItem.create({
+        data: {
+          organizationId,
+          orderId: order.id,
+          tabId: tab.id,
+          unitId,
+          productId: setup.products.soda,
+          productName: 'Refrigerante',
+          unitPriceCents: 600,
+          quantity: 2,
+          position: 0,
+          prepStationId: setup.stations.delivery,
+          stageId: setup.stages.delivered,
+          stageEnteredAt: new Date('2020-01-15T21:30:00Z'),
+        },
+      });
+
       const overview = await admin
-        .call('get', `${API}/admin/metrics/overview?from=2026-09-01&to=2026-09-30`)
+        .call('get', `${API}/admin/metrics/overview?from=2020-01-01&to=2020-01-31`)
         .expect(200);
       const counts = await platform.organization.groupBy({
         by: ['subscriptionStatus'],
         _count: { _all: true },
       });
       expect(overview.body).toMatchObject({
-        period: { from: '2026-09-01', to: '2026-09-30', timeZone: 'America/Sao_Paulo' },
+        period: { from: '2020-01-01', to: '2020-01-31', timeZone: 'America/Sao_Paulo' },
         organizationsByStatus: Object.fromEntries(
           counts.map((row) => [row.subscriptionStatus, row._count._all]),
         ),
-        shifts: { total: 0 },
-        tabs: 0,
-        soldCents: 0,
-        averageTicketCents: 0,
+        activeOrganizations: 1,
+        operationDays: { total: 2 },
+        tabs: 1,
+        soldCents: 1200,
+        averageTicketCents: 1200,
       });
-      expect((overview.body as { shifts: { byWeek: unknown[] } }).shifts.byWeek).toHaveLength(5);
+      const byWeek = (overview.body as { operationDays: { byWeek: unknown[] } }).operationDays
+        .byWeek;
+      // Weeks of January 2020 by Monday: 30/12, 06/01, 13/01, 20/01, 27/01.
+      expect(byWeek).toEqual([
+        { weekStart: '2019-12-30', count: 0 },
+        { weekStart: '2020-01-06', count: 1 },
+        { weekStart: '2020-01-13', count: 1 },
+        { weekStart: '2020-01-20', count: 0 },
+        { weekStart: '2020-01-27', count: 0 },
+      ]);
 
       const usage = await admin
-        .call('get', `${API}/admin/metrics/organizations?sort=lastAccessAt&order=desc`)
+        .call(
+          'get',
+          `${API}/admin/metrics/organizations?from=2020-01-01&to=2020-01-31&sort=operationDays&order=desc`,
+        )
         .expect(200);
-      const row = (
-        usage.body as { data: { organizationId: string; lastAccessAt: string }[] }
-      ).data.find((item) => item.organizationId === tenant.organizationId);
-      expect(row).toMatchObject({ lastAccessAt: '2026-09-15T12:00:00.000Z', shifts: 0 });
+      const rows = (
+        usage.body as {
+          data: { organizationId: string; lastAccessAt: string; operationDays: number }[];
+        }
+      ).data;
+      expect(rows[0]).toMatchObject({
+        organizationId: tenant.organizationId,
+        lastAccessAt: '2026-09-15T12:00:00.000Z',
+        operationDays: 2,
+        tabs: 1,
+        soldCents: 1200,
+      });
       await admin
         .call('get', `${API}/admin/metrics/overview?from=2026-10-01&to=2026-09-01`)
         .expect(400);

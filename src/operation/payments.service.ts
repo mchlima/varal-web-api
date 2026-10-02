@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { AuditService } from '../audit/audit.service.js';
 import { requireOrganizationId } from '../context/request-context.js';
 import { AppError } from '../errors/app-error.js';
-import type { CashRegister, Tab } from '../generated/prisma/client.js';
+import type { CashRegisterSession, Tab } from '../generated/prisma/client.js';
 import type { DiscountType, PaymentMethod } from '../generated/prisma/enums.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
 import { CashRegistersService } from './cash-registers.service.js';
@@ -17,9 +17,10 @@ import { applyPayment, type AppliedPayment, type PaymentRefusal } from './paymen
 import { lockRow } from './row-lock.js';
 import {
   activePaymentIds,
-  assertShiftOpen,
+  assertInOperation,
   CLOSED_STATUSES,
-  requireShift,
+  currentBusinessDate,
+  insertTab,
   requireTab,
   TabsService,
 } from './tabs.service.js';
@@ -62,7 +63,13 @@ export async function settleIfCovered(
   }
   await db.tab.update({
     where: { id: tabId },
-    data: { status: 'paid', closedAt: new Date(), version: { increment: 1 } },
+    data: {
+      status: 'paid',
+      closedAt: new Date(),
+      // RN-04.38: the day of the sale (spec 07, RN-07.01).
+      closedBusinessDate: await currentBusinessDate(db, summary.unitId),
+      version: { increment: 1 },
+    },
   });
   await audit.record(db, {
     action: 'tab.paid',
@@ -118,7 +125,7 @@ export class PaymentsService {
   /**
    * `POST /tabs/{id}/payments` (RN-05.04 to RN-05.10; CA-05.01 to CA-05.03, CA-05.08): only in
    * `closing`; pix and cards up to the balance, cash with change; into an open register of the
-   * shift; the tab becomes `paid` when the balance reaches zero.
+   * unit; the tab becomes `paid` when the balance reaches zero.
    */
   async pay(tabId: string, input: CreatePaymentRequest): Promise<PaymentResultDto> {
     return this.prisma.transaction(async (db) => {
@@ -141,45 +148,38 @@ export class PaymentsService {
       if (typeof applied === 'string') {
         throw refusalError(applied, summary.balanceCents);
       }
-      const register = await this.registers.forPayment(db, tab.shiftId, input.cashRegisterId);
+      const session = await this.registers.forPayment(db, tab.unitId, input.cashRegisterId);
       const access = await this.access.forUnit(db, tab.unitId);
-      const paymentId = await this.record(db, tab, register, input.method, applied, access.actor);
+      const paymentId = await this.record(db, tab, session, input.method, applied, access.actor);
       await db.tab.update({ where: { id: tabId }, data: { version: { increment: 1 } } });
       await settleIfCovered(db, this.audit, tabId);
-      await this.registers.touched(db, register.id);
+      await this.registers.touched(db, session.id);
       return this.result(db, tabId, paymentId);
     });
   }
 
   /**
    * RN-06.09 to RN-06.11 (CA-06.03): a payment of a tab on credit is a settlement. It needs an open
-   * shift and an open register in the unit of the tab (any shift, not the tab's), goes into that
-   * register marked `is_credit_settlement`, may be partial, and the tab becomes `settled` when the
-   * balance reaches zero. Methods and change follow spec 05.
+   * register in the unit of the tab, goes into its session (the day it was received) marked
+   * `is_credit_settlement`, may be partial, and the tab becomes `settled` when the balance reaches
+   * zero. Methods and change follow spec 05.
    */
   private async settle(
     db: TenantDb,
     tab: Tab,
     input: CreatePaymentRequest,
   ): Promise<PaymentResultDto> {
-    const shift = await db.shift.findFirst({
-      where: { unitId: tab.unitId, status: 'open' },
-      select: { id: true },
-    });
-    if (!shift) {
-      throw operationError('NO_SHIFT_OPEN');
-    }
     const summary = await loadTabSummary(db, tab.id);
     const applied = applyPayment(input, summary.balanceCents);
     if (typeof applied === 'string') {
       throw refusalError(applied, summary.balanceCents);
     }
-    const register = await this.registers.forPayment(db, shift.id, input.cashRegisterId);
+    const session = await this.registers.forPayment(db, tab.unitId, input.cashRegisterId);
     const access = await this.access.forUnit(db, tab.unitId);
     const paymentId = await this.record(
       db,
       tab,
-      register,
+      session,
       input.method,
       applied,
       access.actor,
@@ -203,13 +203,14 @@ export class PaymentsService {
         metadata: { unitId: tab.unitId, totalCents: summary.totalCents, paymentId },
       });
     }
-    await this.registers.touched(db, register.id);
+    await this.registers.touched(db, session.id);
     return this.result(db, tab.id, paymentId);
   }
 
   /**
-   * RN-05.13 to RN-05.15 (CA-05.05): reverses a payment with a reason while its shift and its
-   * register are open. The payment stays, marked; a `paid` tab goes back to `closing`.
+   * RN-05.13 to RN-05.15 (CA-05.05, CA-05.13): reverses a payment with a reason while the cash
+   * register session it came in is open (`CASH_REGISTER_CLOSED` otherwise). The payment stays,
+   * marked; a `paid` tab goes back to `closing`.
    */
   async reverse(paymentId: string, reason: string): Promise<PaymentResultDto> {
     return this.prisma.transaction(async (db) => {
@@ -222,16 +223,15 @@ export class PaymentsService {
       if (payment.reversedAt !== null) {
         throw operationError('PAYMENT_ALREADY_REVERSED');
       }
-      await assertShiftOpen(db, payment.shiftId);
       const credit = tab.status === 'on_credit' || tab.status === 'settled';
       if (credit ? !payment.isCreditSettlement : !OPEN_FOR_REVERSAL.includes(tab.status)) {
         // RN-06.06, RN-06.12: on a tab on credit only settlements are reversed; the payments made
         // before putting it on credit stay.
         throw operationError('TAB_CLOSED');
       }
-      await lockRow(db, 'cash_registers', payment.cashRegisterId);
-      const register = await db.cashRegister.findUniqueOrThrow({
-        where: { id: payment.cashRegisterId },
+      await lockRow(db, 'cash_register_sessions', payment.cashRegisterSessionId);
+      const register = await db.cashRegisterSession.findUniqueOrThrow({
+        where: { id: payment.cashRegisterSessionId },
       });
       if (register.status !== 'open') {
         throw operationError('CASH_REGISTER_CLOSED');
@@ -255,7 +255,9 @@ export class PaymentsService {
         where: { id: tab.id },
         data: {
           version: { increment: 1 },
-          ...(tab.status === 'paid' ? { status: 'closing', closedAt: null } : {}),
+          ...(tab.status === 'paid'
+            ? { status: 'closing', closedAt: null, closedBusinessDate: null }
+            : {}),
           ...(tab.status === 'settled' ? { status: 'on_credit', settledAt: null } : {}),
         },
       });
@@ -268,7 +270,7 @@ export class PaymentsService {
         metadata: {
           tabId: tab.id,
           unitId: tab.unitId,
-          cashRegisterId: register.id,
+          cashRegisterSessionId: register.id,
           method: payment.method,
           amountCents: payment.amountCents,
           tabStatusBefore: tab.status,
@@ -282,44 +284,29 @@ export class PaymentsService {
   }
 
   /**
-   * `POST /shifts/{id}/tabs/pay-first` (RN-04.11, RN-05.12; CA-04.10, CA-05.09): tab, order and
-   * payments in one transaction. The tab is born `paid`; when the payments do not cover the total
-   * nothing is written. Events (`tab.created`, `order.created`) leave only after the commit, so no
-   * item reaches a station before its payment is registered.
+   * `POST /units/{id}/tabs/pay-first` (RN-04.11, RN-05.12; CA-04.10, CA-05.09): tab, order and
+   * payments in one transaction, with a register open (RN-04.02). The tab is born `paid`; when the
+   * payments do not cover the total nothing is written. Events (`tab.created`, `order.created`)
+   * leave only after the commit, so no item reaches a station before its payment is registered.
    */
-  async payFirst(shiftId: string, input: PayFirstRequest): Promise<TabDto> {
+  async payFirst(unitId: string, input: PayFirstRequest): Promise<TabDto> {
     return this.prisma.transaction(async (db) => {
-      const shift = await requireShift(db, shiftId);
-      const access = await this.access.forUnit(db, shift.unitId);
+      const access = await this.access.forUnit(db, unitId);
       assertCounter(access);
-      const [numbered] = await db.shift.updateManyAndReturn({
-        where: { id: shiftId, status: 'open' },
-        data: { nextTabNumber: { increment: 1 } },
-      });
-      if (!numbered) {
-        throw operationError('SHIFT_CLOSED');
-      }
+      await assertInOperation(db, unitId);
       const now = new Date();
-      const tab = await db.tab.create({
-        data: {
-          organizationId: requireOrganizationId(),
-          shiftId,
-          unitId: shift.unitId,
-          number: numbered.nextTabNumber - 1,
-          customerName: input.customerName,
-          mode: 'pay_first',
-          status: 'paid',
-          openedByType: access.actor.type,
-          openedById: access.actor.id,
-          closedAt: now,
-        },
+      const tab = await insertTab(db, unitId, access, {
+        customerName: input.customerName,
+        mode: 'pay_first',
+        status: 'paid',
+        closedAt: now,
       });
       await this.audit.record(db, {
         action: 'tab.opened',
         entityType: 'tab',
         entityId: tab.id,
         after: { number: tab.number, customerName: tab.customerName, mode: tab.mode },
-        metadata: { shiftId, unitId: shift.unitId },
+        metadata: { unitId, eventId: tab.eventId },
       });
       const order = await this.tabs.insertOrder(db, tab, access, input.items, now);
       const { totalCents } = await loadTabSummary(db, tab.id, now);
@@ -342,18 +329,18 @@ export class PaymentsService {
         });
       }
       if (applied.length > 0) {
-        const register = await this.registers.forPayment(db, shiftId, input.cashRegisterId);
+        const session = await this.registers.forPayment(db, unitId, input.cashRegisterId);
         for (const payment of applied) {
-          await this.record(db, tab, register, payment.input.method, payment.value, access.actor);
+          await this.record(db, tab, session, payment.input.method, payment.value, access.actor);
         }
-        await this.registers.touched(db, register.id);
+        await this.registers.touched(db, session.id);
       }
       await this.audit.record(db, {
         action: 'tab.paid',
         entityType: 'tab',
         entityId: tab.id,
         after: { status: 'paid' },
-        metadata: { unitId: shift.unitId, totalCents, mode: 'pay_first' },
+        metadata: { unitId, totalCents, mode: 'pay_first' },
       });
       const dto = await loadTab(db, tab.id, now);
       this.events.tab(TabCreated, dto);
@@ -417,16 +404,12 @@ export class PaymentsService {
     });
   }
 
-  /** The tab locked (lock order: tab, then cash register), in an open shift, at the counter. */
+  /** The tab locked (lock order: tab, then cash register session), at the counter. */
   private async lockTab(db: TenantDb, tabId: string, version: number | undefined): Promise<Tab> {
     const found = await requireTab(db, tabId);
     assertCounter(await this.access.forUnit(db, found.unitId));
     await lockRow(db, 'tabs', tabId);
     const tab = await requireTab(db, tabId);
-    if (tab.status !== 'on_credit' && tab.status !== 'settled') {
-      // RN-06.09: a tab on credit is settled (or its settlement reversed) in any later shift.
-      await assertShiftOpen(db, tab.shiftId);
-    }
     if (version !== undefined && version !== tab.version) {
       throw operationError('TAB_CHANGED', { currentVersion: tab.version });
     }
@@ -436,7 +419,7 @@ export class PaymentsService {
   private async record(
     db: TenantDb,
     tab: Tab,
-    register: CashRegister,
+    session: CashRegisterSession,
     method: PaymentMethod,
     applied: AppliedPayment,
     actor: { type: 'owner' | 'staff'; id: string },
@@ -446,8 +429,7 @@ export class PaymentsService {
       data: {
         organizationId: requireOrganizationId(),
         tabId: tab.id,
-        shiftId: register.shiftId,
-        cashRegisterId: register.id,
+        cashRegisterSessionId: session.id,
         method,
         amountCents: applied.amountCents,
         tenderedCents: applied.tenderedCents,
@@ -468,7 +450,12 @@ export class PaymentsService {
         changeCents: applied.changeCents,
         isCreditSettlement,
       },
-      metadata: { tabId: tab.id, unitId: tab.unitId, cashRegisterId: register.id },
+      metadata: {
+        tabId: tab.id,
+        unitId: tab.unitId,
+        cashRegisterSessionId: session.id,
+        cashRegisterId: session.cashRegisterId,
+      },
     });
     return payment.id;
   }

@@ -61,7 +61,7 @@ export const contractSchemas: readonly z.ZodType[] = [
   SetupErrorCodeSchema,
   ...unitContractSchemas,
   ...setupEventSchemas,
-  // Spec 04: operation (shifts, tabs, orders, items).
+  // Specs 04 to 06: operation (cash registers, events, tabs, orders, items, fiado).
   OperationErrorCodeSchema,
   ...operationContractSchemas,
   ...cashContractSchemas,

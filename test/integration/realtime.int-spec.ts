@@ -112,6 +112,8 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
           name: 'Cozinha',
           kind: 'queue',
           sortOrder: 1,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
         },
         {
           id: STATION_A2,
@@ -120,6 +122,8 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
           name: 'Cozinha',
           kind: 'queue',
           sortOrder: 1,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
         },
         {
           id: STATION_B1,
@@ -128,6 +132,8 @@ describe.skipIf(!databaseUrl)('real time (spec 01, section 10)', () => {
           name: 'Cozinha',
           kind: 'queue',
           sortOrder: 1,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
         },
       ],
     });

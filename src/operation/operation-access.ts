@@ -20,7 +20,7 @@ export function isOwner(access: OperatorAccess): boolean {
   return access.permission === null;
 }
 
-/** RN-04.02: the owner and staff with `can_operate_cash` open and close shifts. */
+/** RN-05.16: the owner and staff with `can_operate_cash` open, move and close cash registers. */
 export function canOperateCash(access: OperatorAccess): boolean {
   return access.permission === null || access.permission.canOperateCash;
 }
@@ -44,7 +44,7 @@ function forbidden(message: string): AppError {
 
 export function assertCanOperateCash(
   access: OperatorAccess,
-  message = 'Só o dono ou quem opera o caixa nesta unidade pode abrir e fechar turno.',
+  message = 'Só o dono ou quem opera o caixa nesta unidade pode fazer isso.',
 ): void {
   if (!canOperateCash(access)) {
     throw forbidden(message);

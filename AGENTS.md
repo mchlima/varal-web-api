@@ -95,7 +95,7 @@ Localmente, os repositórios ficam lado a lado numa pasta comum (`varal/varal-do
 ## Convenções de código
 
 - **Idioma:**
-  - **Inglês** em toda a codebase: variáveis, funções, classes, componentes, arquivos, tabelas e colunas, rotas da API (`/api/v1/tabs`), eventos, enums e chaves de permissão. Use os nomes do glossário das specs (ex.: comanda = `Tab`, turno = `Shift`, fiado = `on_credit`).
+  - **Inglês** em toda a codebase: variáveis, funções, classes, componentes, arquivos, tabelas e colunas, rotas da API (`/api/v1/tabs`), eventos, enums e chaves de permissão. Use os nomes do glossário das specs (ex.: comanda = `Tab`, abertura de caixa = `CashRegisterSession`, fiado = `on_credit`).
   - **Português do Brasil** em tudo que o usuário vê: textos da interface, mensagens de erro exibidas e **rotas do front** (`/balcao`, `/painel/cardapio`). Specs e mensagens de commit também em português.
   - No Nuxt, os arquivos em `pages/` seguem o nome da rota em português (`pages/balcao.vue`), por ser o roteamento por arquivo. É a única exceção ao inglês; componentes, composables e stores continuam em inglês.
 - **TypeScript estrito.** Sem `any` sem justificativa.
@@ -184,7 +184,7 @@ Todo commit segue o [Conventional Commits 1.0.0](https://www.conventionalcommits
 ```
 
 - **Tipos:** `feat` (funcionalidade), `fix` (correção), `docs` (documentação e specs), `refactor`, `test`, `perf`, `style` (formatação, sem mudar comportamento), `build` (dependências, empacotamento), `ci`, `chore` (manutenção).
-- **Escopo:** o módulo afetado, em inglês e minúsculas: `auth`, `tenancy`, `audit`, `email`, `realtime`, `rbac`, `organizations`, `announcements`, `metrics`, `impersonation`, `units`, `workflow`, `menu`, `staff`, `shifts`, `tabs`, `orders`, `cash`, `credit`, `reports`, `ui`. Cada repositório pode acrescentar os seus (ver a seção específica dele).
+- **Escopo:** o módulo afetado, em inglês e minúsculas: `auth`, `tenancy`, `audit`, `email`, `realtime`, `rbac`, `organizations`, `announcements`, `metrics`, `impersonation`, `units`, `workflow`, `menu`, `staff`, `pricing`, `events`, `tabs`, `orders`, `cash`, `credit`, `reports`, `ui`. Cada repositório pode acrescentar os seus (ver a seção específica dele).
 - **Descrição:** em português, no imperativo, minúscula no início, sem ponto final, até cerca de 72 caracteres. Cite a regra quando houver: `feat(tabs): permite reabrir comanda em fechamento (RN-04.12)`.
 - **Mudança incompatível:** `!` depois do tipo/escopo e rodapé `BREAKING CHANGE: <explicação>`.
 - Um commit por mudança coerente.

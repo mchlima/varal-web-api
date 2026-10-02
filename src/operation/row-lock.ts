@@ -4,10 +4,17 @@ import type { TenantDb } from '../prisma/prisma.service.js';
 
 /** Tables of the operation locked before a change (`SELECT … FOR UPDATE`). */
 export type LockableTable =
-  'units' | 'shifts' | 'tabs' | 'order_items' | 'cash_registers' | 'payments' | 'customers';
+  | 'units'
+  | 'tabs'
+  | 'order_items'
+  | 'cash_registers'
+  | 'cash_register_sessions'
+  | 'contracted_events'
+  | 'payments'
+  | 'customers';
 
 /**
- * Locks one row until the end of the transaction, so concurrent changes of the same shift, tab or
+ * Locks one row until the end of the transaction, so concurrent changes of the same unit, tab or
  * item run one after the other (CA-04.02, CA-04.05). Returns false when the row does not exist in
  * the organization.
  *

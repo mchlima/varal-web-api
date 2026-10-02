@@ -26,7 +26,19 @@ export const ExpectedVersionSchema = z.int().min(0).meta({
 
 /** Spec 03, section 3: from 1 to 240 minutes, default 15. */
 export const LateAfterMinutesSchema = z.int().min(1).max(240).meta({
-  description: 'Minutos a partir dos quais um item na estação aparece como atrasado (1 a 240).',
+  description:
+    'Padrão do atraso das estações novas da unidade, em minutos (1 a 240); a atenção nasce na metade (RN-03.25).',
+});
+
+/** RN-03.25: limits of a `queue` station (attention < delay; checked by the service). */
+const StationAttentionSchema = z.int().min(1).max(239).meta({
+  description:
+    'Minutos desde o envio do pedido a partir dos quais o cartão fica em atenção (RN-03.25); de 1 até o atraso − 1.',
+});
+
+const StationLateSchema = z.int().min(2).max(240).meta({
+  description:
+    'Minutos desde o envio do pedido a partir dos quais o cartão fica atrasado (RN-03.25), até 240.',
 });
 
 // ------------------------------------------------------------------------------------------------
@@ -119,6 +131,12 @@ export const StationSchema = z
     kind: StationKindSchema,
     sortOrder: z.int(),
     active: z.boolean(),
+    attentionAfterMinutes: z.int().nullable().meta({
+      description: 'Limite de atenção (RN-03.25); só nas estações `queue`, `null` no balcão.',
+    }),
+    lateAfterMinutes: z.int().nullable().meta({
+      description: 'Limite de atraso (RN-03.25); só nas estações `queue`, `null` no balcão.',
+    }),
   })
   .meta({ id: 'Station' });
 
@@ -134,7 +152,16 @@ export const StationListSchema = z
   .meta({ id: 'StationList' });
 
 export const CreateStationRequestSchema = z
-  .object({ name: NameSchema, kind: StationKindSchema, sortOrder: SortOrderSchema.optional() })
+  .object({
+    name: NameSchema,
+    kind: StationKindSchema,
+    sortOrder: SortOrderSchema.optional(),
+    attentionAfterMinutes: StationAttentionSchema.optional(),
+    lateAfterMinutes: StationLateSchema.optional().meta({
+      description:
+        'Só em `queue`. Sem os limites, a estação recebe o atraso padrão da unidade e a atenção na metade (RN-03.25).',
+    }),
+  })
   .meta({ id: 'CreateStationRequest' });
 
 export const UpdateStationRequestSchema = z
@@ -143,8 +170,14 @@ export const UpdateStationRequestSchema = z
     kind: StationKindSchema.optional(),
     sortOrder: SortOrderSchema.optional(),
     active: z.boolean().optional(),
+    attentionAfterMinutes: StationAttentionSchema.optional(),
+    lateAfterMinutes: StationLateSchema.optional(),
   })
-  .meta({ id: 'UpdateStationRequest' });
+  .meta({
+    id: 'UpdateStationRequest',
+    description:
+      'Mudar só os limites de tempo é permitido com caixa aberto e vale na hora para os cartões (RN-03.25); as demais mudanças seguem a RN-03.07.',
+  });
 
 export function toStationDto(station: Station): StationDto {
   return {
@@ -154,6 +187,8 @@ export function toStationDto(station: Station): StationDto {
     kind: station.kind,
     sortOrder: station.sortOrder,
     active: station.active,
+    attentionAfterMinutes: station.attentionAfterMinutes,
+    lateAfterMinutes: station.lateAfterMinutes,
   };
 }
 

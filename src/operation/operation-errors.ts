@@ -3,32 +3,61 @@ import { z } from 'zod';
 import { AppError } from '../errors/app-error.js';
 
 /**
- * Error codes of the operation (spec 04): shifts, tabs, orders and items. Messages in pt-BR, safe
- * to show. Published in the OpenAPI as `OperationErrorCode`.
+ * Error codes of the operation (specs 04 to 06): cash registers, price lists in use, events, tabs,
+ * orders, items, payments and the fiado. Messages in pt-BR, safe to show. Published in the OpenAPI
+ * as `OperationErrorCode`.
  */
 export const OPERATION_ERRORS = {
-  /** CA-04.01, RN-04.01: the unit already has an open shift. */
-  SHIFT_ALREADY_OPEN: { status: 409, message: 'Esta unidade já está com um turno aberto.' },
-  /** RN-04.03: shifts are not opened in an inactive unit. */
+  /**
+   * RN-04.02, CA-04.01, RN-05.06, CA-05.08: no cash register open in the unit, so no new tab, order
+   * or payment.
+   */
+  NO_CASH_REGISTER_OPEN: {
+    status: 409,
+    message: 'Abra um caixa para vender e receber nesta unidade.',
+  },
+  /** RN-05.24: a register is not opened in an inactive unit. */
   UNIT_INACTIVE: {
     status: 409,
-    message: 'Esta unidade está desativada. Ative-a para abrir turno.',
+    message: 'Esta unidade está desativada. Ative-a para abrir o caixa.',
   },
-  /** RN-04.08: a closed shift accepts no change. */
-  SHIFT_CLOSED: { status: 409, message: 'Este turno já foi fechado e não aceita alterações.' },
-  /**
-   * CA-04.09, RN-04.07: tabs still `open`/`closing` (`details.tabs`) or cash registers still open
-   * (`details.cashRegisters`, spec 05).
-   */
-  SHIFT_HAS_PENDING_ITEMS: {
+  /** RN-05.23, CA-05.10: the register already has a session in progress (`details.sessionId`). */
+  CASH_REGISTER_ALREADY_OPEN: { status: 409, message: 'Este caixa já está aberto.' },
+  /** RN-05.27: an inactive register is not opened. */
+  CASH_REGISTER_INACTIVE: {
+    status: 409,
+    message: 'Este caixa está desativado. Ative-o no cadastro dos caixas para abrir.',
+  },
+  /** RN-04.32, CA-04.14: during an event the current list is the event's and does not change. */
+  EVENT_IN_PROGRESS: {
     status: 409,
     message:
-      'Ainda há comandas ou caixas em aberto neste turno. Resolva as pendências para fechar.',
+      'Há um evento em andamento: a tabela de preço é a do evento. Encerre o evento para trocar a tabela.',
   },
-  /** RN-04.06: a product of the price table is not of the unit of the shift (`details.productIds`). */
-  INVALID_SHIFT_PRICE: {
+  /** RN-04.35, CA-04.15: the unit already has an event in progress (`details.eventId`). */
+  EVENT_ALREADY_IN_PROGRESS: {
+    status: 409,
+    message: 'Esta unidade já tem um evento em andamento. Encerre-o antes de iniciar outro.',
+  },
+  /** RN-04.34: only a scheduled event is started or canceled. */
+  EVENT_NOT_SCHEDULED: {
+    status: 409,
+    message: 'Só um evento agendado pode ser iniciado ou cancelado.',
+  },
+  /** RN-04.34: only an event in progress is finished. */
+  EVENT_NOT_IN_PROGRESS: { status: 409, message: 'Este evento não está em andamento.' },
+  /** RN-04.34, RN-04.37: a finished or canceled event does not change. */
+  EVENT_CLOSED: {
+    status: 409,
+    message: 'Este evento já foi encerrado ou cancelado e não pode ser alterado.',
+  },
+  /**
+   * RN-04.05, RN-04.31: the price list does not exist in the unit or is inactive (spec 03,
+   * RN-03.23).
+   */
+  INVALID_PRICE_LIST: {
     status: 400,
-    message: 'Um dos produtos da tabela de preços não existe ou não é desta unidade.',
+    message: 'Escolha uma tabela de preço ativa desta unidade.',
   },
   /** RN-04.13: orders and "pedir a conta" only on an `open` tab. */
   TAB_NOT_OPEN: {
@@ -61,8 +90,9 @@ export const OPERATION_ERRORS = {
     message: 'Alguns itens do pedido não podem ser enviados. Confira os itens indicados.',
   },
   /**
-   * CA-04.05, spec 04 section 7: another device changed the item first. `details.item` has the
-   * current state, `details.currentVersion` its version.
+   * CA-04.05, CA-04.17, spec 04 section 7: another device changed the item first. `details.item` has
+   * the current state, `details.currentVersion` its version; when advancing a whole order
+   * (RN-04.39), `details.items` has the current lines of the order at the station.
    */
   ITEM_CHANGED: {
     status: 409,
@@ -79,33 +109,31 @@ export const OPERATION_ERRORS = {
     status: 400,
     message: 'A quantidade precisa ser de 1 até a quantidade do item.',
   },
+  /** RN-04.39: the lines sent are not at the station (or stage) given. */
+  ITEM_NOT_AT_STATION: {
+    status: 409,
+    message: 'Os itens enviados não estão nesta estação. A tela foi atualizada.',
+  },
   // ----------------------------------------------------------------------------------------------
   // Spec 05: discounts, payments and cash registers
   // ----------------------------------------------------------------------------------------------
-  /** RN-05.06, CA-05.08: no cash register open in the shift. */
-  NO_CASH_REGISTER_OPEN: {
-    status: 409,
-    message: 'Abra um caixa para receber.',
-  },
   /** RN-05.05: more than one register open; choose one (`details.cashRegisters`). */
   CASH_REGISTER_REQUIRED: {
     status: 409,
     message: 'Há mais de um caixa aberto. Escolha o caixa que recebe o pagamento.',
   },
-  /** RN-05.05: the register is not of the shift of the tab. */
+  /** RN-05.05: the register does not exist in the unit of the tab. */
   INVALID_CASH_REGISTER: {
     status: 400,
-    message: 'Este caixa não existe ou não é do turno desta comanda.',
+    message: 'Este caixa não existe ou não é da unidade desta comanda.',
   },
-  /** RN-05.13, RN-05.21: a closed register takes no payment, reversal nor movement. */
+  /**
+   * RN-05.13, RN-05.21, CA-05.13: the session is closed (or the register chosen is not open): no
+   * payment, reversal nor movement.
+   */
   CASH_REGISTER_CLOSED: {
     status: 409,
     message: 'Este caixa já foi fechado e não aceita mais lançamentos.',
-  },
-  /** RN-05.17: another register of the shift already has this name. */
-  CASH_REGISTER_NAME_TAKEN: {
-    status: 409,
-    message: 'Já existe um caixa com este nome neste turno.',
   },
   /** RN-05.18: a withdrawal never goes past the cash expected in the drawer (`details`). */
   WITHDRAWAL_EXCEEDS_CASH: {
@@ -181,11 +209,6 @@ export const OPERATION_ERRORS = {
   },
   /** RN-06.05: putting on credit needs a customer (optional only in `consumption_billed`, RN-06.08). */
   CUSTOMER_REQUIRED: { status: 400, message: 'Escolha o cliente para pendurar a comanda.' },
-  /** RN-06.09: a settlement needs an open shift in the unit of the tab. */
-  NO_SHIFT_OPEN: {
-    status: 409,
-    message: 'Abra um turno e um caixa nesta unidade para receber o fiado.',
-  },
   /** Concurrency: the `version` of the customer changed (`details.currentVersion`). */
   CUSTOMER_CHANGED: {
     status: 409,
@@ -208,5 +231,5 @@ export const OperationErrorCodeSchema = z
   .meta({
     id: 'OperationErrorCode',
     description:
-      'Códigos de erro da operação (specs 04 a 06): turno, comandas, pedidos, itens, descontos, pagamentos, caixas e fiado. `SHIFT_OPEN` (spec 03) e `ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED` (spec 02) também aparecem nestas rotas.',
+      'Códigos de erro da operação (specs 04 a 06): caixas, eventos, tabela vigente, comandas, pedidos, itens, descontos, pagamentos e fiado. Códigos da configuração (`SetupErrorCode`, como `CASH_REGISTER_OPEN`) e da assinatura (`ORGANIZATION_SUSPENDED`/`ORGANIZATION_CANCELED`, spec 02) também aparecem nestas rotas.',
   });

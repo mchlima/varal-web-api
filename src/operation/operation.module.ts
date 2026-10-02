@@ -9,15 +9,17 @@ import { CreditService } from './credit.service.js';
 import { OperationAccessService } from './operation-access.js';
 import { OperationController } from './operation.controller.js';
 import { OperationEvents } from './operation-events.js';
+import { EventsService } from './events.service.js';
 import { OrderItemsService } from './order-items.service.js';
 import { PaymentsService } from './payments.service.js';
-import { ShiftsService } from './shifts.service.js';
 import { TabsService } from './tabs.service.js';
+import { UnitOperationService } from './unit-operation.service.js';
 
 /**
- * Operation of the units (spec 04): shifts, tabs, orders, items and station queues, with real-time
- * events (section 7.1), their closing (spec 05): discounts, payments and cash registers, and the
- * fiado (spec 06): customers, tabs on credit and settlements.
+ * Operation of the units (spec 04): day of operation, current price list, contracted events, tabs,
+ * orders, items and station queues, with real-time events (section 7.1); their closing (spec 05):
+ * discounts, payments, cash registers and their sessions; and the fiado (spec 06): customers, tabs
+ * on credit and settlements.
  */
 @Module({
   imports: [RealtimeModule, UnitsModule],
@@ -25,13 +27,14 @@ import { TabsService } from './tabs.service.js';
   providers: [
     CashRegistersService,
     CreditService,
+    EventsService,
     OperationAccessService,
     OperationEvents,
     OrderItemsService,
     PaymentsService,
-    ShiftsService,
     TabsService,
+    UnitOperationService,
   ],
-  exports: [ShiftsService],
+  exports: [OperationAccessService],
 })
 export class OperationModule {}

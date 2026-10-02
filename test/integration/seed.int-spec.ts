@@ -9,6 +9,7 @@ import {
   SEED_MENU,
   SEED_ON_CREDIT,
   SEED_PAY_FIRST,
+  SEED_PRICE_LIST,
   SEED_TABS,
   seed,
 } from '../../scripts/seed.js';
@@ -95,14 +96,30 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     ).toEqual({ ana: ['Balcão', 'Balcão de entrega'], bruno: ['Cozinha'] });
   });
 
-  it('spec 04: an open shift with example tabs and items in different stages', async () => {
+  it('spec 03: "Caixa 1" and the price list "Evento", not current (fase 7.5)', async () => {
     const result = await seed(platform);
-    const shifts = await platform.shift.findMany({ where: { unitId: result.unitId } });
-    expect(shifts).toHaveLength(1);
+    const registers = await platform.cashRegister.findMany({ where: { unitId: result.unitId } });
+    expect(registers.map((row) => [row.name, row.active])).toEqual([['Caixa 1', true]]);
+    const lists = await platform.priceList.findMany({
+      where: { unitId: result.unitId },
+      include: { prices: { include: { product: true } } },
+    });
+    expect(lists.map((list) => [list.name, list.active])).toEqual([[SEED_PRICE_LIST.name, true]]);
+    expect(lists[0]?.prices.map((price) => [price.product.name, price.priceCents]).sort()).toEqual(
+      SEED_PRICE_LIST.prices.map((price) => [price.product, price.priceCents]).sort(),
+    );
+    const unit = await platform.unit.findUniqueOrThrow({ where: { id: result.unitId } });
+    expect(unit.currentPriceListId).toBeNull();
+  });
+
+  it('spec 04: "Caixa 1" open today with example tabs and items in different stages', async () => {
+    const result = await seed(platform);
+    const unit = await platform.unit.findUniqueOrThrow({ where: { id: result.unitId } });
     // Plus the "paga antes" tab (spec 05) and the tab on credit (spec 06).
-    expect(shifts[0]).toMatchObject({ status: 'open', nextTabNumber: SEED_TABS.length + 3 });
+    expect(unit.nextTabNumber).toBe(SEED_TABS.length + 3);
+    expect(unit.businessDate).not.toBeNull();
     const tabs = await platform.tab.findMany({
-      where: { shiftId: shifts[0]?.id, mode: 'open_tab', status: { not: 'on_credit' } },
+      where: { unitId: result.unitId, mode: 'open_tab', status: { not: 'on_credit' } },
       orderBy: { number: 'asc' },
       include: { items: { include: { stage: true } } },
     });
@@ -139,22 +156,19 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
     expect(tabs[0]?.payments).toEqual([]);
   });
 
-  it('spec 05: an open cash register with a partial Pix and a "paga antes" tab paid in cash', async () => {
+  it('spec 05: an open session of "Caixa 1" with a partial Pix and a "paga antes" tab paid in cash', async () => {
     const result = await seed(platform);
-    const shift = await platform.shift.findFirstOrThrow({
-      where: { unitId: result.unitId, status: 'open' },
+    const sessions = await platform.cashRegisterSession.findMany({
+      where: { unitId: result.unitId },
+      include: {
+        cashRegister: true,
+        payments: { include: { tab: true }, orderBy: { id: 'asc' } },
+      },
     });
-    const registers = await platform.cashRegister.findMany({
-      where: { shiftId: shift.id },
-      include: { payments: { include: { tab: true }, orderBy: { id: 'asc' } } },
-    });
-    expect(registers).toHaveLength(1);
-    expect(registers[0]).toMatchObject({
-      name: 'Caixa 1',
-      status: 'open',
-      openingFloatCents: 10_000,
-    });
-    const payments = registers[0]?.payments ?? [];
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({ status: 'open', openingFloatCents: 10_000 });
+    expect(sessions[0]?.cashRegister.name).toBe('Caixa 1');
+    const payments = sessions[0]?.payments ?? [];
     expect(payments.map((payment) => [payment.method, payment.tab.status])).toEqual([
       ['pix', 'closing'],
       ['cash', 'paid'],
@@ -218,12 +232,14 @@ describe.skipIf(!databaseUrl)('seed (CA-01.01)', () => {
         platform.product.count(),
         platform.modifierGroup.count(),
         platform.modifier.count(),
-        platform.shift.count(),
+        platform.priceList.count(),
+        platform.productPrice.count(),
         platform.tab.count(),
         platform.order.count(),
         platform.orderItem.count(),
         platform.orderItemModifier.count(),
         platform.cashRegister.count(),
+        platform.cashRegisterSession.count(),
         platform.payment.count(),
         platform.customer.count(),
       ]);

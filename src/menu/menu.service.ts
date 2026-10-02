@@ -5,6 +5,12 @@ import { requireOrganizationId } from '../context/request-context.js';
 import { AppError } from '../errors/app-error.js';
 import type { Category } from '../generated/prisma/client.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
+import {
+  listPrices,
+  loadUnitPricing,
+  NORMAL_PRICE_LIST_NAME,
+  priceFor,
+} from '../units/effective-price-list.js';
 import { isValidPrepStation } from '../units/routing.js';
 import { setupError } from '../units/setup-errors.js';
 import { SetupEvents } from '../units/setup-events.js';
@@ -16,6 +22,7 @@ import {
   type MenuDto,
   toCategoryDto,
   toModifierGroupDto,
+  toPriceListDto,
   toProductDto,
 } from './menu.schemas.js';
 
@@ -71,7 +78,7 @@ export interface UpdateCategoryInput {
 /**
  * Menu of a unit (spec 03, section 5): the full read for the owner and the staff of the unit, and
  * the categories (owner only). Every change bumps the menu version and emits `menu.updated`.
- * RN-03.12: changes are allowed with an open shift; items already ordered keep their copy.
+ * RN-03.12: changes are allowed with an open cash register; items already ordered keep their copy.
  */
 @Injectable()
 export class MenuService {
@@ -84,8 +91,9 @@ export class MenuService {
 
   /**
    * `GET /units/{id}/menu`: the owner sees everything, with `active`; staff of the unit see only
-   * active categories, products and modifiers (RN-03.10: inactive products do not reach the
-   * counter; sold-out ones do, blocked).
+   * active categories, products, modifiers and price lists (RN-03.10: inactive products do not
+   * reach the counter; sold-out ones do, blocked). Each product carries its prices per list and the
+   * effective price of a new item (spec 03, section 8; RN-04.32).
    */
   async read(unitId: string): Promise<MenuDto> {
     const access = await this.access.forMember(unitId);
@@ -109,15 +117,38 @@ export class MenuService {
       where: { modifierGroupId: { in: groups.map((group) => group.id) }, ...activeFilter },
       orderBy: order,
     });
+    const lists = await db.priceList.findMany({
+      where: { unitId, ...activeFilter },
+      orderBy: order,
+    });
+    const prices = await db.productPrice.findMany({
+      where: { priceListId: { in: lists.map((list) => list.id) } },
+      orderBy: [{ priceListId: 'asc' }],
+    });
+    const pricing = await loadUnitPricing(db, unitId);
+    const effectivePrices = await listPrices(db, pricing.effective?.id ?? null);
     return {
       unitId,
       version: access.unit.menuVersion,
+      priceLists: lists.map((list) =>
+        toPriceListDto(list, {
+          productCount: prices.filter((price) => price.priceListId === list.id).length,
+          current: list.id === pricing.current?.id,
+        }),
+      ),
+      currentPriceListId: pricing.current?.id ?? null,
+      effectivePriceListId: pricing.effective?.id ?? null,
+      effectivePriceListName: pricing.effective?.name ?? NORMAL_PRICE_LIST_NAME,
       categories: categories.map((category) => ({
         ...toCategoryDto(category),
         products: products
           .filter((product) => product.categoryId === category.id)
           .map((product) => ({
             ...toProductDto(product, category),
+            prices: prices
+              .filter((price) => price.productId === product.id)
+              .map((price) => ({ priceListId: price.priceListId, priceCents: price.priceCents })),
+            effectivePriceCents: priceFor(product, effectivePrices).priceCents,
             modifierGroups: groups
               .filter((group) => group.productId === product.id)
               .map((group) =>

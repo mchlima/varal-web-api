@@ -7,9 +7,10 @@ import type { Station } from '../generated/prisma/client.js';
 import type { StationKind } from '../generated/prisma/enums.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
 import { RealtimeService } from '../realtime/realtime.service.js';
-import { OpenShiftChecker } from './open-shift.js';
+import { OperationGuard } from './operation-guard.js';
 import { setupError } from './setup-errors.js';
 import { SetupEvents } from './setup-events.js';
+import { defaultTimeLimits, type TimeLimits, validTimeLimits } from './time-limits.js';
 import { type StationDto, toStationDto } from './units.schemas.js';
 import { ownersOf } from './units.service.js';
 
@@ -17,6 +18,8 @@ export interface CreateStationInput {
   name: string;
   kind: StationKind;
   sortOrder?: number | undefined;
+  attentionAfterMinutes?: number | undefined;
+  lateAfterMinutes?: number | undefined;
 }
 
 export interface UpdateStationInput {
@@ -24,12 +27,50 @@ export interface UpdateStationInput {
   kind?: StationKind | undefined;
   sortOrder?: number | undefined;
   active?: boolean | undefined;
+  attentionAfterMinutes?: number | undefined;
+  lateAfterMinutes?: number | undefined;
+}
+
+/**
+ * RN-03.25: the limits of a `queue` station after a change. A counter has none; a station that
+ * becomes `queue` gets the defaults of the unit; fields not sent keep their value.
+ */
+function limitsAfter(
+  kind: StationKind,
+  current: { attentionAfterMinutes: number | null; lateAfterMinutes: number | null } | null,
+  input: { attentionAfterMinutes?: number | undefined; lateAfterMinutes?: number | undefined },
+  unitLateAfterMinutes: number,
+): TimeLimits | null {
+  if (kind !== 'queue') {
+    if (input.attentionAfterMinutes !== undefined || input.lateAfterMinutes !== undefined) {
+      throw setupError('INVALID_TIME_LIMITS', { reason: 'counter' });
+    }
+    return null;
+  }
+  const base =
+    current?.lateAfterMinutes != null && current.attentionAfterMinutes != null
+      ? {
+          attentionAfterMinutes: current.attentionAfterMinutes,
+          lateAfterMinutes: current.lateAfterMinutes,
+        }
+      : defaultTimeLimits(unitLateAfterMinutes);
+  const limits = {
+    attentionAfterMinutes: input.attentionAfterMinutes ?? base.attentionAfterMinutes,
+    lateAfterMinutes: input.lateAfterMinutes ?? base.lateAfterMinutes,
+  };
+  if (!validTimeLimits(limits)) {
+    throw setupError('INVALID_TIME_LIMITS');
+  }
+  return limits;
 }
 
 /**
  * Stations of a unit (spec 03, section 4.1). Owner only. Never deleted, only deactivated.
  *
- * - RN-03.07 / CA-03.03: with an open shift, stations cannot change (`SHIFT_OPEN`).
+ * - RN-03.07 / CA-03.03: with an open cash register (`CASH_REGISTER_OPEN`) or items in preparation
+ *   (`ITEMS_IN_PROGRESS`), stations cannot change, except their time limits, which apply at once
+ *   to the cards on the screen (RN-03.25, CA-04.24).
+ * - RN-03.25 / CA-03.12: `queue` stations have attention and delay limits (`INVALID_TIME_LIMITS`).
  * - RN-03.04: the unit keeps at least one active `counter` and one active `queue` station.
  * - A station the workflow (`fixed_station`), a category or a product points to stays an active
  *   `queue` station (`STATION_IN_USE`), so routing never lands on a closed screen (RN-03.06, 03.08).
@@ -39,7 +80,7 @@ export class StationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    private readonly shifts: OpenShiftChecker,
+    private readonly guard: OperationGuard,
     private readonly events: SetupEvents,
     private readonly realtime: RealtimeService,
   ) {}
@@ -56,9 +97,10 @@ export class StationsService {
 
   async create(unitId: string, input: CreateStationInput): Promise<StationDto> {
     return this.prisma.transaction(async (db) => {
-      await requireUnit(db, unitId);
-      await this.shifts.assertNoOpenShift(db, unitId);
+      const unit = await requireUnit(db, unitId);
+      await this.guard.assertCanChangeFlow(db, unitId);
       await this.assertNameFree(db, unitId, input.name, null);
+      const limits = limitsAfter(input.kind, null, input, unit.lateAfterMinutes);
       const last = await db.station.aggregate({ where: { unitId }, _max: { sortOrder: true } });
       const station = await db.station.create({
         data: {
@@ -67,6 +109,8 @@ export class StationsService {
           name: input.name,
           kind: input.kind,
           sortOrder: input.sortOrder ?? (last._max.sortOrder ?? 0) + 1,
+          attentionAfterMinutes: limits?.attentionAfterMinutes ?? null,
+          lateAfterMinutes: limits?.lateAfterMinutes ?? null,
         },
       });
       await this.audit.record(db, {
@@ -90,7 +134,14 @@ export class StationsService {
         throw AppError.of('NOT_FOUND');
       }
       const unitId = current.unitId;
-      await this.shifts.assertNoOpenShift(db, unitId);
+      const onlyLimits =
+        input.name === undefined &&
+        input.kind === undefined &&
+        input.sortOrder === undefined &&
+        input.active === undefined;
+      if (!onlyLimits) {
+        await this.guard.assertCanChangeFlow(db, unitId);
+      }
       if (input.name !== undefined && input.name.toLowerCase() !== current.name.toLowerCase()) {
         await this.assertNameFree(db, unitId, input.name, stationId);
       }
@@ -99,6 +150,8 @@ export class StationsService {
         active: input.active ?? current.active,
       };
       await this.assertStillUsable(db, current, next);
+      const unit = await requireUnit(db, unitId);
+      const limits = limitsAfter(next.kind, current, input, unit.lateAfterMinutes);
 
       const station = await db.station.update({
         where: { id: stationId },
@@ -107,6 +160,8 @@ export class StationsService {
           ...(input.kind === undefined ? {} : { kind: input.kind }),
           ...(input.sortOrder === undefined ? {} : { sortOrder: input.sortOrder }),
           ...(input.active === undefined ? {} : { active: input.active }),
+          attentionAfterMinutes: limits?.attentionAfterMinutes ?? null,
+          lateAfterMinutes: limits?.lateAfterMinutes ?? null,
         },
       });
       await this.audit.record(db, {
@@ -197,5 +252,7 @@ function audited(station: Station): Record<string, unknown> {
     kind: station.kind,
     sortOrder: station.sortOrder,
     active: station.active,
+    attentionAfterMinutes: station.attentionAfterMinutes,
+    lateAfterMinutes: station.lateAfterMinutes,
   };
 }

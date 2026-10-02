@@ -1,13 +1,17 @@
 import { Injectable } from '@nestjs/common';
 
 import { AuditService } from '../audit/audit.service.js';
+import { dateColumn, isoDateOf, todayInSaoPaulo } from '../common/time.js';
 import { updateWithVersion } from '../common/versioned-update.js';
 import { requireOrganizationId } from '../context/request-context.js';
 import { AppError } from '../errors/app-error.js';
-import type { Shift, Tab } from '../generated/prisma/client.js';
-import type { TabStatus } from '../generated/prisma/enums.js';
+import type { Tab, Unit } from '../generated/prisma/client.js';
+import type { TabMode, TabStatus } from '../generated/prisma/enums.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
+import { listPrices, loadUnitPricing } from '../units/effective-price-list.js';
+import { OPEN_TAB_STATUSES } from '../units/operation-guard.js';
 import { resolvePrepStationId, stationForStage } from '../units/routing.js';
+import { nextTabNumber } from './business-day.js';
 import { assertCounter, OperationAccessService, type OperatorAccess } from './operation-access.js';
 import { operationError } from './operation-errors.js';
 import { OperationEvents, TabCreated, TabUpdated } from './operation-events.js';
@@ -23,12 +27,78 @@ import {
   checkOrderItems,
   copyModifiers,
   type MenuProductForOrder,
-  unitPriceFor,
+  pricedLine,
 } from './order-rules.js';
 import { lockRow } from './row-lock.js';
 
 /** RN-04.28: a tab that left `open`/`closing` accepts no change. */
 export const CLOSED_STATUSES: readonly TabStatus[] = ['paid', 'on_credit', 'settled', 'canceled'];
+
+/**
+ * RN-04.02 (CA-04.01): opening a tab and sending an order need the unit in operation, that is, a
+ * cash register open (`NO_CASH_REGISTER_OPEN`).
+ */
+export async function assertInOperation(db: TenantDb, unitId: string): Promise<void> {
+  const open = await db.cashRegisterSession.count({ where: { unitId, status: 'open' } });
+  if (open === 0) {
+    throw operationError('NO_CASH_REGISTER_OPEN');
+  }
+}
+
+/**
+ * RN-04.09, RN-04.29, RN-04.36 (CA-04.02): writes a tab with the next number of the day of
+ * operation, skipping the numbers of tabs of earlier days still open, tied to the event in progress.
+ * Locks the unit row: two counters never get the same number. The caller checked the operation.
+ */
+export async function insertTab(
+  db: TenantDb,
+  unitId: string,
+  access: OperatorAccess,
+  input: { customerName: string; mode: TabMode; status: TabStatus; closedAt?: Date | undefined },
+): Promise<Tab> {
+  await lockRow(db, 'units', unitId);
+  const unit: Unit = await db.unit.findUniqueOrThrow({ where: { id: unitId } });
+  if (unit.businessDate === null) {
+    // A register was opened, so the unit has a day of operation (RN-05.25).
+    throw operationError('NO_CASH_REGISTER_OPEN');
+  }
+  const open = await db.tab.findMany({
+    where: { unitId, status: { in: [...OPEN_TAB_STATUSES] }, number: { gte: unit.nextTabNumber } },
+    select: { number: true },
+  });
+  const number = nextTabNumber(unit.nextTabNumber, new Set(open.map((tab) => tab.number)));
+  await db.unit.update({ where: { id: unitId }, data: { nextTabNumber: number + 1 } });
+  const event = await db.contractedEvent.findFirst({
+    where: { unitId, status: 'in_progress' },
+    select: { id: true },
+  });
+  const closed = input.status !== 'open' && input.status !== 'closing';
+  return db.tab.create({
+    data: {
+      organizationId: requireOrganizationId(),
+      unitId,
+      number,
+      businessDate: unit.businessDate,
+      closedBusinessDate: closed ? unit.businessDate : null,
+      eventId: event?.id ?? null,
+      customerName: input.customerName,
+      mode: input.mode,
+      status: input.status,
+      openedByType: access.actor.type,
+      openedById: access.actor.id,
+      closedAt: input.closedAt ?? null,
+    },
+  });
+}
+
+/** RN-04.38: the day of operation of the unit, kept by a tab when it leaves `open`/`closing`. */
+export async function currentBusinessDate(db: TenantDb, unitId: string): Promise<Date> {
+  const unit = await db.unit.findUniqueOrThrow({
+    where: { id: unitId },
+    select: { businessDate: true },
+  });
+  return unit.businessDate ?? dateColumn(todayInSaoPaulo());
+}
 
 /**
  * Tabs and orders (spec 04, sections 4 and 5). Operated from the counter: the owner and staff with
@@ -43,14 +113,28 @@ export class TabsService {
     private readonly events: OperationEvents,
   ) {}
 
-  /** `GET /shifts/{id}/tabs?status=open,closing`: the varal of the counter, by number. */
-  async list(shiftId: string, statuses: readonly TabStatus[]): Promise<TabSummaryDto[]> {
+  /**
+   * `GET /units/{id}/tabs?status=open,closing`: the varal of the counter, every open tab of the
+   * unit from any day (RN-04.07), oldest day first, then by number. Tabs already closed (`paid`,
+   * `on_credit`, `settled`, `canceled`) come only from the current day of operation, so the list
+   * stays the size of a day.
+   */
+  async list(unitId: string, statuses: readonly TabStatus[]): Promise<TabSummaryDto[]> {
     const db = this.prisma.db;
-    const shift = await requireShift(db, shiftId);
-    await this.access.forUnit(db, shift.unitId);
+    const access = await this.access.forUnit(db, unitId);
+    const open = statuses.filter((status) => status === 'open' || status === 'closing');
+    const closed = statuses.filter((status) => status !== 'open' && status !== 'closing');
     const tabs = await db.tab.findMany({
-      where: { shiftId, status: { in: [...statuses] } },
-      orderBy: { number: 'asc' },
+      where: {
+        unitId,
+        OR: [
+          ...(open.length > 0 ? [{ status: { in: open } }] : []),
+          ...(closed.length > 0 && access.unit.businessDate !== null
+            ? [{ status: { in: closed }, closedBusinessDate: access.unit.businessDate }]
+            : []),
+        ],
+      },
+      orderBy: [{ businessDate: 'asc' }, { number: 'asc' }, { id: 'asc' }],
     });
     return loadTabSummaries(db, tabs);
   }
@@ -62,40 +146,26 @@ export class TabsService {
     return loadTab(db, tabId);
   }
 
-  /** RN-04.09, RN-04.10, CA-04.02: an `open_tab` tab with the next number of the shift. */
-  async create(shiftId: string, customerName: string): Promise<TabDto> {
+  /**
+   * RN-04.02, RN-04.09, RN-04.10, RN-04.36 (CA-04.01, CA-04.02, CA-04.14): an `open_tab` tab with
+   * the next number of the day, tied to the event in progress. Needs a register open.
+   */
+  async create(unitId: string, customerName: string): Promise<TabDto> {
     return this.prisma.transaction(async (db) => {
-      const shift = await requireShift(db, shiftId);
-      const access = await this.access.forUnit(db, shift.unitId);
+      const access = await this.access.forUnit(db, unitId);
       assertCounter(access);
-      // The increment locks the shift row: two counters never get the same number, and a shift
-      // closed meanwhile matches nothing (the WHERE is checked again after the lock).
-      const [numbered] = await db.shift.updateManyAndReturn({
-        where: { id: shiftId, status: 'open' },
-        data: { nextTabNumber: { increment: 1 } },
-      });
-      if (!numbered) {
-        throw operationError('SHIFT_CLOSED');
-      }
-      const tab = await db.tab.create({
-        data: {
-          organizationId: requireOrganizationId(),
-          shiftId,
-          unitId: shift.unitId,
-          number: numbered.nextTabNumber - 1,
-          customerName,
-          mode: 'open_tab',
-          status: 'open',
-          openedByType: access.actor.type,
-          openedById: access.actor.id,
-        },
+      await assertInOperation(db, unitId);
+      const tab = await insertTab(db, unitId, access, {
+        customerName,
+        mode: 'open_tab',
+        status: 'open',
       });
       await this.audit.record(db, {
         action: 'tab.opened',
         entityType: 'tab',
         entityId: tab.id,
         after: { number: tab.number, customerName, mode: tab.mode, status: tab.status },
-        metadata: { shiftId, unitId: shift.unitId },
+        metadata: { unitId, eventId: tab.eventId, businessDate: isoDateOf(tab.businessDate) },
       });
       const dto = await loadTab(db, tab.id);
       this.events.tab(TabCreated, dto);
@@ -137,7 +207,6 @@ export class TabsService {
       // Same lock as payments: a payment never lands on a tab being canceled.
       await lockRow(db, 'tabs', tabId);
       const tab = await requireTab(db, tabId);
-      await assertShiftOpen(db, tab.shiftId);
       if (tab.status === 'paid') {
         throw operationError('TAB_PAID', { paymentIds: await activePaymentIds(db, tabId) });
       }
@@ -158,7 +227,11 @@ export class TabsService {
       await updateWithVersion<Tab>(db.tab, {
         where: { id: tabId },
         expectedVersion: input.version ?? tab.version,
-        data: { status: 'canceled', closedAt: new Date() },
+        data: {
+          status: 'canceled',
+          closedAt: new Date(),
+          closedBusinessDate: await currentBusinessDate(db, tab.unitId),
+        },
         onConflict: (currentVersion) => operationError('TAB_CHANGED', { currentVersion }),
       });
       await this.audit.record(db, {
@@ -176,9 +249,10 @@ export class TabsService {
   }
 
   /**
-   * `POST /tabs/{id}/orders` (spec 04, section 5): validates every item against the menu
-   * (RN-04.16, RN-04.17; CA-03.06, CA-04.06), copies what was sold (RN-04.18) and puts each item in
-   * the first stage, at the station the stage gives (RN-04.19). Each station gets only its items
+   * `POST /tabs/{id}/orders` (spec 04, section 5): needs a register open (RN-04.02, CA-04.01);
+   * validates every item against the menu (RN-04.16, RN-04.17; CA-03.06, CA-04.06), copies what
+   * was sold with the price of the effective list (RN-04.18, RN-04.32) and puts each item in the
+   * first stage, at the station the stage gives (RN-04.19). Each station gets only its items
    * (CA-04.03).
    */
   async createOrder(tabId: string, input: CreateOrderRequest): Promise<OrderDto> {
@@ -189,10 +263,10 @@ export class TabsService {
       // Orders of the same tab run one at a time (number in the tab, totals).
       await lockRow(db, 'tabs', tabId);
       const tab = await requireTab(db, tabId);
-      await assertShiftOpen(db, tab.shiftId);
       if (CLOSED_STATUSES.includes(tab.status)) {
         throw operationError('TAB_CLOSED');
       }
+      await assertInOperation(db, tab.unitId);
       if (tab.status !== 'open') {
         // RN-04.13: `closing` refuses new orders until reopened.
         throw operationError('TAB_NOT_OPEN');
@@ -239,19 +313,18 @@ export class TabsService {
       }
 
       const flow = await loadUnitFlow(db, tab.unitId);
-      const shiftPrices = new Map(
-        (await db.shiftPrice.findMany({ where: { shiftId: tab.shiftId } })).map((price) => [
-          price.productId,
-          price.priceCents,
-        ]),
-      );
+      // RN-04.32: the list of the event in progress, else the current list of the unit.
+      const pricing = await loadUnitPricing(db, tab.unitId);
+      const effective =
+        pricing.effective === null
+          ? null
+          : { id: pricing.effective.id, prices: await listPrices(db, pricing.effective.id) };
       const numberInTab = (await db.order.count({ where: { tabId } })) + 1;
       const organizationId = requireOrganizationId();
       const order = await db.order.create({
         data: {
           organizationId,
           tabId,
-          shiftId: tab.shiftId,
           numberInTab,
           status: 'sent',
           createdByType: access.actor.type,
@@ -273,7 +346,7 @@ export class TabsService {
             unitId: tab.unitId,
             productId: product.id,
             productName: product.name,
-            unitPriceCents: unitPriceFor(product, shiftPrices),
+            ...pricedLine(product, effective),
             quantity: item.quantity,
             note: item.note === '' ? null : (item.note ?? null),
             position,
@@ -297,7 +370,7 @@ export class TabsService {
       }
       await db.tab.update({ where: { id: tabId }, data: { version: { increment: 1 } } });
 
-      const [dto] = await loadOrders(db, { id: order.id }, flow.lateAfterMinutes, now);
+      const [dto] = await loadOrders(db, { id: order.id }, flow, now);
       if (!dto) {
         throw AppError.of('INTERNAL_ERROR');
       }
@@ -313,11 +386,12 @@ export class TabsService {
             productId: item.productId,
             productName: item.productName,
             unitPriceCents: item.unitPriceCents,
+            priceListId: item.priceListId,
             quantity: item.quantity,
             modifiers: item.modifiers.map((modifier) => modifier.modifierName),
           })),
         },
-        metadata: { unitId: tab.unitId, shiftId: tab.shiftId },
+        metadata: { unitId: tab.unitId, priceListId: pricing.effective?.id ?? null },
       });
       return dto;
     }
@@ -336,7 +410,6 @@ export class TabsService {
     return this.prisma.transaction(async (db) => {
       const tab = await requireTab(db, tabId);
       assertCounter(await this.access.forUnit(db, tab.unitId));
-      await assertShiftOpen(db, tab.shiftId);
       if (CLOSED_STATUSES.includes(tab.status)) {
         throw operationError('TAB_CLOSED');
       }
@@ -418,14 +491,6 @@ export class TabsService {
   }
 }
 
-export async function requireShift(db: TenantDb, shiftId: string): Promise<Shift> {
-  const shift = await db.shift.findUnique({ where: { id: shiftId } });
-  if (!shift) {
-    throw AppError.of('NOT_FOUND');
-  }
-  return shift;
-}
-
 export async function requireTab(db: TenantDb, tabId: string): Promise<Tab> {
   const tab = await db.tab.findUnique({ where: { id: tabId } });
   if (!tab) {
@@ -442,15 +507,4 @@ export async function activePaymentIds(db: TenantDb, tabId: string): Promise<str
     select: { id: true },
   });
   return rows.map((row) => row.id);
-}
-
-/** RN-04.08: nothing changes in a closed shift. */
-export async function assertShiftOpen(db: TenantDb, shiftId: string): Promise<void> {
-  const shift = await db.shift.findUniqueOrThrow({
-    where: { id: shiftId },
-    select: { status: true },
-  });
-  if (shift.status !== 'open') {
-    throw operationError('SHIFT_CLOSED');
-  }
 }
