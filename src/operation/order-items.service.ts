@@ -25,11 +25,17 @@ import {
   toOrderItemDto,
   type UnitFlow,
 } from './operation-reader.js';
-import type { ItemChangeDto, OrderItemDto, StationQueueDto } from './operation.schemas.js';
-import { isLate, isWaste, lateAtOf } from './order-rules.js';
+import type {
+  AdvanceOrderResultDto,
+  ItemChangeDto,
+  OrderItemDto,
+  StationOrderDto,
+  StationQueueDto,
+} from './operation.schemas.js';
+import { afterSent, isLate, isWaste, lateAtOf } from './order-rules.js';
 import { settleIfCovered } from './payments.service.js';
 import { lockRow } from './row-lock.js';
-import { activePaymentIds, assertShiftOpen } from './tabs.service.js';
+import { activePaymentIds, currentBusinessDate } from './tabs.service.js';
 
 /** The item, locked, with the context of its unit. */
 interface LockedItem {
@@ -68,10 +74,6 @@ export class OrderItemsService {
       if (row.canceledAt !== null) {
         throw operationError('ITEM_CANCELED');
       }
-      await assertShiftOpen(
-        db,
-        (await db.tab.findUniqueOrThrow({ where: { id: row.tabId } })).shiftId,
-      );
       const { current, next } = neighbours(flow, row.stageId);
       if (!current || current.isFinal || !next) {
         throw operationError('ITEM_IN_FINAL_STAGE');
@@ -109,7 +111,7 @@ export class OrderItemsService {
       const wasLate = isLate(
         lateAtOf(
           { canceledAt: null, inFinalStage: false, sentAt: row.order.sentAt },
-          flow.lateAfterMinutes,
+          flow.limitsOf(row.prepStationId).lateAfterMinutes,
         ),
         now,
       );
@@ -135,10 +137,6 @@ export class OrderItemsService {
       if (row.canceledAt !== null) {
         throw operationError('ITEM_CANCELED');
       }
-      await assertShiftOpen(
-        db,
-        (await db.tab.findUniqueOrThrow({ where: { id: row.tabId } })).shiftId,
-      );
       const { current, next, previous } = neighbours(flow, row.stageId);
       if (!current || current.isFinal) {
         throw operationError('ITEM_IN_FINAL_STAGE');
@@ -203,7 +201,6 @@ export class OrderItemsService {
       // The tab after the item (same lock order as every item change): its totals change.
       await lockRow(db, 'tabs', row.tabId);
       const tab = await db.tab.findUniqueOrThrow({ where: { id: row.tabId } });
-      await assertShiftOpen(db, tab.shiftId);
       if (tab.status === 'paid') {
         // RN-04.28, RN-05.14: reverse the payment first (the tab goes back to `closing`), then
         // cancel the item and receive again, or cancel the tab.
@@ -217,6 +214,8 @@ export class OrderItemsService {
       const actor = access.actor;
       const canceled = {
         canceledAt: now,
+        // RN-04.27, RN-04.30: waste counts by the day of operation of the cancellation.
+        canceledBusinessDate: await currentBusinessDate(db, row.unitId),
         canceledByType: actor.type,
         canceledById: actor.id,
         cancelReason: input.reason,
@@ -274,8 +273,10 @@ export class OrderItemsService {
   }
 
   /**
-   * `GET /stations/{id}/queue`: lines shown at the station, from the oldest order on, lines of the
-   * same order together (spec 04, section 8.2). The owner and staff with the station.
+   * `GET /stations/{id}/queue` (RN-04.40 to RN-04.45; CA-04.20 to CA-04.22): one card per order
+   * with at least one line pending at the station, oldest first. Each card has the lines of the
+   * order that are of this station (pending, done here, canceled here), "+ N itens em outra
+   * estação" and the times of the station (RN-04.46). The owner and staff with the station.
    */
   async queue(stationId: string): Promise<StationQueueDto> {
     const db = this.prisma.db;
@@ -288,16 +289,23 @@ export class OrderItemsService {
       throw AppError.of('FORBIDDEN', { message: 'Você não tem acesso a esta estação.' });
     }
     const flow = await loadUnitFlow(db, station.unitId);
+    const limits = flow.limitsOf(stationId);
     const now = new Date();
+    const orders = await db.order.findMany({
+      where: { items: { some: { stationId, canceledAt: null } } },
+      include: { tab: { select: { mode: true } } },
+      orderBy: [{ sentAt: 'asc' }, { id: 'asc' }],
+    });
     const rows = await db.orderItem.findMany({
-      where: { stationId, canceledAt: null },
+      where: { orderId: { in: orders.map((order) => order.id) } },
       include: itemInclude,
-      orderBy: [{ order: { sentAt: 'asc' } }, { orderId: 'asc' }, ...itemOrder],
+      orderBy: itemOrder,
     });
     return {
       stationId,
       unitId: station.unitId,
-      lateAfterMinutes: flow.lateAfterMinutes,
+      attentionAfterMinutes: limits.attentionAfterMinutes,
+      lateAfterMinutes: limits.lateAfterMinutes,
       stages: flow.stages.map((stage) => ({
         id: stage.id,
         name: stage.name,
@@ -306,8 +314,145 @@ export class OrderItemsService {
         stationId: stage.stationId,
         isFinal: stage.isFinal,
       })),
-      items: rows.map((row) => toOrderItemDto(row, flow.lateAfterMinutes, now)),
+      orders: orders.map((order): StationOrderDto => {
+        const own = rows.filter((row) => row.orderId === order.id);
+        const lines = own.flatMap((row) => {
+          const state = lineState(flow, row, stationId);
+          return state === null ? [] : [{ ...toOrderItemDto(row, flow, now), state }];
+        });
+        const others = own.filter(
+          (row) =>
+            row.canceledAt === null &&
+            row.stationId !== null &&
+            lineState(flow, row, stationId) === null,
+        );
+        const first = own[0];
+        return {
+          orderId: order.id,
+          tabId: order.tabId,
+          tabNumber: first?.tab.number ?? 0,
+          customerName: first?.tab.customerName ?? '',
+          tabMode: order.tab.mode,
+          numberInTab: order.numberInTab,
+          isAdditional: order.numberInTab > 1,
+          sentAt: order.sentAt.toISOString(),
+          attentionAt: afterSent(order.sentAt, limits.attentionAfterMinutes).toISOString(),
+          lateAt: afterSent(order.sentAt, limits.lateAfterMinutes).toISOString(),
+          lines,
+          otherStationsQuantity: others.reduce((sum, row) => sum + row.quantity, 0),
+        };
+      }),
     };
+  }
+
+  /**
+   * `POST /orders/{id}/advance` (RN-04.39, CA-04.17): advances at once every line of the order that
+   * is at the station (and stage, with the filter), each to the next stage of its own. All or none:
+   * the lines sent must be exactly those, with the versions the device saw; otherwise 409
+   * `ITEM_CHANGED` with the current lines and nothing is applied.
+   */
+  async advanceOrder(
+    orderId: string,
+    input: {
+      stationId: string;
+      stageId?: string | undefined;
+      items: { id: string; version: number }[];
+    },
+  ): Promise<AdvanceOrderResultDto> {
+    return this.prisma.transaction(async (db) => {
+      const order = await db.order.findUnique({ where: { id: orderId } });
+      if (!order) {
+        throw AppError.of('NOT_FOUND');
+      }
+      const stationId = input.stationId.toLowerCase();
+      const stageId = input.stageId?.toLowerCase();
+      const ids = [...new Set(input.items.map((item) => item.id.toLowerCase()))].sort();
+      // Same lock order as single changes: items (by id), then the tab.
+      for (const id of ids) {
+        await lockRow(db, 'order_items', id);
+      }
+      const atStation = await db.orderItem.findMany({
+        where: {
+          orderId,
+          stationId,
+          canceledAt: null,
+          ...(stageId === undefined ? {} : { stageId }),
+        },
+        include: itemInclude,
+        orderBy: itemOrder,
+      });
+      if (atStation.length === 0) {
+        throw operationError('ITEM_NOT_AT_STATION');
+      }
+      const unitId = atStation[0]?.unitId ?? '';
+      const access = await this.access.forUnit(db, unitId);
+      const flow = await loadUnitFlow(db, unitId);
+      const now = new Date();
+      const sent = new Map(input.items.map((item) => [item.id.toLowerCase(), item.version]));
+      const same =
+        atStation.length === sent.size &&
+        atStation.every((row) => sent.get(row.id) === row.version);
+      if (!same) {
+        throw operationError('ITEM_CHANGED', {
+          items: atStation.map((row) => toOrderItemDto(row, flow, now)),
+        });
+      }
+      const moves = atStation.map((row) => {
+        const { current, next } = neighbours(flow, row.stageId);
+        if (!current || current.isFinal || !next) {
+          throw operationError('ITEM_IN_FINAL_STAGE');
+        }
+        return { row, next };
+      });
+      const allowed =
+        hasStation(access, stationId) ||
+        (moves.every((move) => move.next.isFinal) && hasCounter(access));
+      if (!allowed) {
+        throw forbiddenItem();
+      }
+      let countersChanged = false;
+      for (const { row, next } of moves) {
+        const target = {
+          stageId: next.id,
+          stationId: stationForStage(next, row.prepStationId),
+          stageEnteredAt: now,
+        };
+        await updateWithVersion<OrderItem>(db.orderItem, {
+          where: { id: row.id },
+          expectedVersion: row.version,
+          data: target,
+        });
+        await this.audit.record(db, {
+          action: 'order_item.stage_changed',
+          entityType: 'order_item',
+          entityId: row.id,
+          before: { stageId: row.stageId, stationId: row.stationId },
+          after: { stageId: next.id, stationId: target.stationId },
+          metadata: { unitId, direction: 'forward', quantity: row.quantity, wholeOrder: true },
+        });
+        countersChanged ||=
+          isReadyStage(flow, row.stageId) || isReadyStage(flow, next.id) || next.isFinal;
+      }
+      const changed = await db.orderItem.findMany({
+        where: { id: { in: atStation.map((row) => row.id) } },
+        include: itemInclude,
+        orderBy: itemOrder,
+      });
+      const dtos = changed.map((row) => toOrderItemDto(row, flow, now));
+      for (const dto of dtos) {
+        const before = atStation.find((row) => row.id === dto.id);
+        if (before) {
+          this.events.stageChanged(
+            dto,
+            { stageId: before.stageId, stationId: before.stationId },
+            null,
+          );
+        }
+      }
+      await this.tabCountersChanged(db, order.tabId, countersChanged, now);
+      await this.completeOrderIfDone(db, orderId, unitId, now);
+      return { orderId, items: dtos };
+    });
   }
 
   /**
@@ -352,7 +497,7 @@ export class OrderItemsService {
     if (row.version !== expectedVersion) {
       throw operationError('ITEM_CHANGED', {
         currentVersion: row.version,
-        item: toOrderItemDto(row, flow.lateAfterMinutes, now),
+        item: toOrderItemDto(row, flow, now),
       });
     }
     return { row, flow, access, now };
@@ -404,7 +549,15 @@ export class OrderItemsService {
       stationId: string | null;
       stageEnteredAt: Date;
     } & Partial<
-      Pick<OrderItem, 'canceledAt' | 'canceledByType' | 'canceledById' | 'cancelReason' | 'wasted'>
+      Pick<
+        OrderItem,
+        | 'canceledAt'
+        | 'canceledBusinessDate'
+        | 'canceledByType'
+        | 'canceledById'
+        | 'cancelReason'
+        | 'wasted'
+      >
     >,
   ): Promise<string> {
     await updateWithVersion<OrderItem>(db.orderItem, {
@@ -445,7 +598,7 @@ export class OrderItemsService {
       if (!row) {
         throw AppError.of('INTERNAL_ERROR');
       }
-      return toOrderItemDto(row, flow.lateAfterMinutes, now);
+      return toOrderItemDto(row, flow, now);
     };
     return { changed: dto(changedId), remaining: remainingId === null ? null : dto(remainingId) };
   }
@@ -479,6 +632,31 @@ export class OrderItemsService {
       this.events.orderCompleted(order, unitId);
     }
   }
+}
+
+/**
+ * RN-04.40, RN-04.41, RN-04.45: how a line shows on the card of `stationId`, or `null` when it is
+ * not of this station. A line belongs to the station when its stage now, or an earlier stage of its
+ * path, puts it there (stations come from the stages, spec 03 section 4.2).
+ */
+function lineState(
+  flow: UnitFlow,
+  row: ItemRow,
+  stationId: string,
+): 'pending' | 'done' | 'canceled' | null {
+  if (row.canceledAt === null && row.stationId === stationId) {
+    return 'pending';
+  }
+  const index = flow.stages.findIndex((stage) => stage.id === row.stageId);
+  const path = index === -1 ? [] : flow.stages.slice(0, index + 1);
+  const passed = path.some((stage) => stationForStage(stage, row.prepStationId) === stationId);
+  if (!passed) {
+    return null;
+  }
+  if (row.canceledAt !== null) {
+    return 'canceled';
+  }
+  return 'done';
 }
 
 /** The stage counted as "pronto para entregar" (`readyItemCount`). */

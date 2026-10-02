@@ -29,6 +29,17 @@ import { IdPipe, NotFoundResponse, OwnerOnly } from '../units/unit-access.js';
 import { MenuService } from './menu.service.js';
 import {
   CategoryListSchema,
+  CreatePriceListRequestSchema,
+  type PriceListDto,
+  PriceListListSchema,
+  type PriceListPricesDto,
+  PriceListPricesSchema,
+  PriceListSchema,
+  type ProductPricesDto,
+  ProductPricesSchema,
+  PutPriceListPricesRequestSchema,
+  PutProductPricesRequestSchema,
+  UpdatePriceListRequestSchema,
   CategoryOrderRequestSchema,
   CategorySchema,
   type CategoryDto,
@@ -52,6 +63,7 @@ import {
   UpdateProductRequestSchema,
 } from './menu.schemas.js';
 import { ModifiersService } from './modifiers.service.js';
+import { PriceListsService } from './price-lists.service.js';
 import { ProductsService } from './products.service.js';
 
 const REFERENCE_DOC =
@@ -65,6 +77,7 @@ export class MenuController {
     private readonly menu: MenuService,
     private readonly products: ProductsService,
     private readonly modifiers: ModifiersService,
+    private readonly priceLists: PriceListsService,
   ) {}
 
   @Get('units/:id/menu')
@@ -78,6 +91,112 @@ export class MenuController {
   })
   readMenu(@Param('id', IdPipe) id: string): Promise<MenuDto> {
     return this.menu.read(id);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // Price lists (spec 03, section 5.3)
+  // ---------------------------------------------------------------------------------------------
+
+  @Get('units/:id/price-lists')
+  @PanelAuth()
+  @ApiOperation({
+    summary:
+      'Tabelas de preço da unidade, com quantos produtos têm preço e qual é a vigente (dono: todas; colaborador: as ativas)',
+  })
+  @ApiOkResponse({ standardSchema: PriceListListSchema })
+  @NotFoundResponse()
+  @ApiForbiddenResponse({
+    description: '`FORBIDDEN`: colaborador sem acesso à unidade.',
+    standardSchema: ErrorResponseSchema,
+  })
+  async listPriceLists(@Param('id', IdPipe) id: string): Promise<{ data: PriceListDto[] }> {
+    return { data: await this.priceLists.list(id) };
+  }
+
+  @Post('units/:id/price-lists')
+  @OwnerOnly()
+  @Idempotent()
+  @ApiOperation({ summary: 'Cria uma tabela de preço na unidade (RN-03.20)' })
+  @ApiCreatedResponse({ standardSchema: PriceListSchema })
+  @NotFoundResponse()
+  @ApiConflictResponse({
+    description: '`PRICE_LIST_NAME_TAKEN` ou `PRICE_LIST_NAME_RESERVED` ("Normal"), CA-03.10.',
+    standardSchema: ErrorResponseSchema,
+  })
+  createPriceList(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: CreatePriceListRequestSchema })
+    body: z.infer<typeof CreatePriceListRequestSchema>,
+  ): Promise<PriceListDto> {
+    return this.priceLists.create(id, body);
+  }
+
+  @Get('price-lists/:id')
+  @OwnerOnly()
+  @ApiOperation({ summary: 'Tabela de preço com os preços que ela tem (tela da tabela, RN-03.22)' })
+  @ApiOkResponse({ standardSchema: PriceListPricesSchema })
+  @NotFoundResponse()
+  getPriceList(@Param('id', IdPipe) id: string): Promise<PriceListPricesDto> {
+    return this.priceLists.get(id);
+  }
+
+  @Patch('price-lists/:id')
+  @OwnerOnly()
+  @ApiOperation({ summary: 'Renomeia, ordena, ativa ou desativa a tabela (RN-03.20, RN-03.23)' })
+  @ApiOkResponse({ standardSchema: PriceListSchema })
+  @NotFoundResponse()
+  @ApiConflictResponse({
+    description:
+      '`PRICE_LIST_IN_USE` (vigente ou de evento agendado ou em andamento, CA-03.10), `PRICE_LIST_NAME_TAKEN`, `PRICE_LIST_NAME_RESERVED` ou `VERSION_CONFLICT`.',
+    standardSchema: ErrorResponseSchema,
+  })
+  updatePriceList(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: UpdatePriceListRequestSchema })
+    body: z.infer<typeof UpdatePriceListRequestSchema>,
+  ): Promise<PriceListDto> {
+    return this.priceLists.update(id, body);
+  }
+
+  @Put('price-lists/:id/prices')
+  @OwnerOnly()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Preços de vários produtos numa tabela; `null` remove o preço (RN-03.22). Vale para itens novos (RN-03.24)',
+  })
+  @ApiOkResponse({ standardSchema: PriceListPricesSchema })
+  @NotFoundResponse()
+  @ApiBadRequestResponse({
+    description: '`INVALID_REFERENCE` (produto de outra unidade) ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
+  putPriceListPrices(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: PutPriceListPricesRequestSchema })
+    body: z.infer<typeof PutPriceListPricesRequestSchema>,
+  ): Promise<PriceListPricesDto> {
+    return this.priceLists.putListPrices(id, body.prices);
+  }
+
+  @Put('products/:id/prices')
+  @OwnerOnly()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Preços de um produto em várias tabelas; `null` remove o preço (RN-03.22)',
+  })
+  @ApiOkResponse({ standardSchema: ProductPricesSchema })
+  @NotFoundResponse()
+  @ApiBadRequestResponse({
+    description: '`INVALID_REFERENCE` (tabela de outra unidade) ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
+  putProductPrices(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: PutProductPricesRequestSchema })
+    body: z.infer<typeof PutProductPricesRequestSchema>,
+  ): Promise<ProductPricesDto> {
+    return this.priceLists.putProductPrices(id, body.prices);
   }
 
   // ---------------------------------------------------------------------------------------------

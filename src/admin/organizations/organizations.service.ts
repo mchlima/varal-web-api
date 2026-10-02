@@ -8,6 +8,7 @@ import { pageArgs, type Page, type PaginationQuery, toPage } from '../../common/
 import { AppError } from '../../errors/app-error.js';
 import { Prisma } from '../../generated/prisma/client.js';
 import type { SubscriptionStatus } from '../../generated/prisma/enums.js';
+import { dayTotals } from '../../reports/report-queries.js';
 import { PlatformPrismaService } from '../../prisma/platform-prisma.service.js';
 import { UnitTemplateService } from '../../units/unit-template.service.js';
 import { adminError } from '../admin-errors.js';
@@ -94,7 +95,7 @@ export class OrganizationsService {
       throw AppError.of('NOT_FOUND');
     }
     const owner = row.users[0];
-    const [invites, units, activeStaffCount, lastAccess, unreadAnnouncements, recentShifts] =
+    const [invites, units, activeStaffCount, lastAccess, unreadAnnouncements, recentDays] =
       await Promise.all([
         this.latestInvites(this.platform, owner ? [owner.id] : []),
         this.platform.unit.findMany({
@@ -117,23 +118,14 @@ export class OrganizationsService {
               },
             })
           : Promise.resolve(0),
-        // Spec 04: the last 10 shifts, newest first.
-        this.platform.shift.findMany({
-          where: { organizationId: id },
-          orderBy: [{ openedAt: 'desc' }, { id: 'desc' }],
-          take: 10,
-          select: { id: true, openedAt: true, closedAt: true },
-        }),
+        // Spec 02, section 4: the last 10 days of operation (unit, day, sale), newest first.
+        this.recentOperationDays(id),
       ]);
     return {
       ...this.toSummary(row, invites),
       units,
       activeStaffCount,
-      recentShifts: recentShifts.map((shift) => ({
-        id: shift.id,
-        openedAt: shift.openedAt.toISOString(),
-        closedAt: shift.closedAt?.toISOString() ?? null,
-      })),
+      recentOperationDays: recentDays,
       lastAccessAt: lastAccess._max.lastUsedAt?.toISOString() ?? null,
       unreadAnnouncements,
     };
@@ -288,6 +280,42 @@ export class OrganizationsService {
     reason: string,
   ): Promise<OrganizationDetail> {
     return this.changeStatus(id, status, reason, 'organization.subscription_status_changed', null);
+  }
+
+  /**
+   * Spec 02, section 4: the last 10 days of operation of the organization (pairs unit and day with
+   * a cash register session), with the sale of each day computed as in the day report (spec 07).
+   */
+  private async recentOperationDays(
+    organizationId: string,
+  ): Promise<OrganizationDetail['recentOperationDays']> {
+    const days = await this.platform.$queryRaw<
+      { unit_id: string; unit_name: string; business_date: string }[]
+    >`
+      SELECT DISTINCT s.unit_id, u.name AS unit_name, s.business_date::text AS business_date
+      FROM cash_register_sessions s
+      JOIN units u ON u.id = s.unit_id AND u.organization_id = ${organizationId}::uuid
+      WHERE s.organization_id = ${organizationId}::uuid
+      ORDER BY business_date DESC, s.unit_id
+      LIMIT 10`;
+    const last = days.at(-1);
+    const first = days[0];
+    if (!last || !first) {
+      return [];
+    }
+    const totals = await dayTotals(this.platform, organizationId, {
+      unitId: null,
+      from: Temporal.PlainDate.from(last.business_date),
+      to: Temporal.PlainDate.from(first.business_date),
+    });
+    return days.map((day) => ({
+      unitId: day.unit_id,
+      unitName: day.unit_name,
+      businessDate: day.business_date,
+      salesCents:
+        totals.find((row) => row.unitId === day.unit_id && row.businessDate === day.business_date)
+          ?.salesCents ?? 0,
+    }));
   }
 
   private async changeStatus(

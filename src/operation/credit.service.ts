@@ -31,10 +31,12 @@ import { OperationEvents, TabUpdated } from './operation-events.js';
 import { loadPayments, loadTab, loadTabSummaries, loadTabSummary } from './operation-reader.js';
 import type { TabDto, TabSummaryDto } from './operation.schemas.js';
 import { lockRow } from './row-lock.js';
-import { assertShiftOpen, CLOSED_STATUSES, requireTab } from './tabs.service.js';
+import { CLOSED_STATUSES, currentBusinessDate, requireTab } from './tabs.service.js';
 
-/** RN-06.08: reference of the customer created for the contractor of a `consumption_billed` shift. */
-const CONTRACTOR_REFERENCE = 'Contratante de turno';
+/** RN-06.08: reference of the customer created for the contractor of a `consumption_billed` event. */
+export const CONTRACTOR_REFERENCE = 'Contratante de evento';
+/** RN-06.08: customers created before 2026-10-02 with the old reference are reused too. */
+const LEGACY_CONTRACTOR_REFERENCE = 'Contratante de turno';
 
 export function toCustomerDto(row: Customer): CustomerDto {
   return {
@@ -275,7 +277,6 @@ export class CreditService {
       assertCounter(await this.access.forUnit(db, found.unitId));
       await lockRow(db, 'tabs', tabId);
       const tab = await requireTab(db, tabId);
-      await assertShiftOpen(db, tab.shiftId);
       if (input.version !== undefined && input.version !== tab.version) {
         throw operationError('TAB_CHANGED', { currentVersion: tab.version });
       }
@@ -290,7 +291,7 @@ export class CreditService {
       if (summary.balanceCents <= 0) {
         throw operationError('TAB_NOTHING_TO_PAY', { balanceCents: summary.balanceCents });
       }
-      const customer = await this.customerFor(db, tab.unitId, tab.shiftId, input.customerId);
+      const customer = await this.customerFor(db, tab.unitId, tab.eventId, input.customerId);
       const now = new Date();
       await db.tab.update({
         where: { id: tabId },
@@ -299,6 +300,8 @@ export class CreditService {
           customerId: customer.id,
           creditAt: now,
           closedAt: now,
+          // RN-04.38: the day it was put on credit (spec 07, RN-07.03).
+          closedBusinessDate: await currentBusinessDate(db, tab.unitId),
           version: { increment: 1 },
         },
       });
@@ -354,11 +357,11 @@ export class CreditService {
     return { unitId, totalCents: sumOnCredit(summaries), tabs: summaries, customers: byCustomer };
   }
 
-  /** RN-06.05, RN-06.08: the customer chosen, or the contractor of a `consumption_billed` shift. */
+  /** RN-06.05, RN-06.08: the customer chosen, or the contractor of a `consumption_billed` event. */
   private async customerFor(
     db: TenantDb,
     unitId: string,
-    shiftId: string,
+    eventId: string | null,
     customerId: string | undefined,
   ): Promise<Customer> {
     if (customerId !== undefined) {
@@ -372,15 +375,19 @@ export class CreditService {
       }
       return customer;
     }
-    const agreement = await db.shiftAgreement.findUnique({
-      where: { organizationId_shiftId: { organizationId: requireOrganizationId(), shiftId } },
-    });
-    if (agreement?.modality !== 'consumption_billed') {
+    const event =
+      eventId === null ? null : await db.contractedEvent.findUnique({ where: { id: eventId } });
+    if (event?.modality !== 'consumption_billed') {
       throw operationError('CUSTOMER_REQUIRED');
     }
-    const name = agreement.contractorName.trim().slice(0, 60);
+    const name = event.contractorName.trim().slice(0, 60);
     const existing = await db.customer.findFirst({
-      where: { unitId, name, reference: CONTRACTOR_REFERENCE, anonymizedAt: null },
+      where: {
+        unitId,
+        name,
+        reference: { in: [CONTRACTOR_REFERENCE, LEGACY_CONTRACTOR_REFERENCE] },
+        anonymizedAt: null,
+      },
       orderBy: { id: 'asc' },
     });
     if (existing) {
@@ -399,7 +406,7 @@ export class CreditService {
       entityType: 'customer',
       entityId: customer.id,
       after: filledFields(customer),
-      metadata: { unitId, shiftId, contractor: true },
+      metadata: { unitId, eventId, contractor: true },
     });
     return customer;
   }

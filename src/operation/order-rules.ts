@@ -157,12 +157,18 @@ export function copyModifiers(
     );
 }
 
-/** RN-04.06, CA-04.07: the price of the shift table when the product is in it, else the menu's. */
-export function unitPriceFor(
+/**
+ * RN-04.18, CA-04.07: the price of the effective list when the product has one (and the list it
+ * came from), else the normal price with no list.
+ */
+export function pricedLine(
   product: { id: string; priceCents: number },
-  shiftPrices: ReadonlyMap<string, number>,
-): number {
-  return shiftPrices.get(product.id) ?? product.priceCents;
+  effective: { id: string; prices: ReadonlyMap<string, number> } | null,
+): { unitPriceCents: number; priceListId: string | null } {
+  const listed = effective?.prices.get(product.id);
+  return listed === undefined || effective === null
+    ? { unitPriceCents: product.priceCents, priceListId: null }
+    : { unitPriceCents: listed, priceListId: effective.id };
 }
 
 // ------------------------------------------------------------------------------------------------
@@ -219,21 +225,43 @@ export function tabTotals(
 }
 
 // ------------------------------------------------------------------------------------------------
-// Lateness (RN-04.23; CA-04.11)
+// Time levels (RN-04.23, RN-04.46; CA-04.11, CA-04.24)
 // ------------------------------------------------------------------------------------------------
 
+/** `minutes` after the order was sent (attention and delay limits, RN-03.25). */
+export function afterSent(sentAt: Date, minutes: number): Date {
+  return toDate(toInstant(sentAt).add({ minutes }));
+}
+
 /**
- * When an item becomes late: `late_after_minutes` after the order was sent. `null` for lines that
- * cannot be late (canceled or in the final stage).
+ * When an item reaches a limit (attention or delay): `minutes` after the order was sent. `null` for
+ * lines that cannot (canceled or in the final stage).
  */
 export function lateAtOf(
   line: { canceledAt: Date | null; inFinalStage: boolean; sentAt: Date },
-  lateAfterMinutes: number,
+  minutes: number,
 ): Date | null {
   if (line.canceledAt !== null || line.inFinalStage) {
     return null;
   }
-  return toDate(toInstant(line.sentAt).add({ minutes: lateAfterMinutes }));
+  return afterSent(line.sentAt, minutes);
+}
+
+export type TimeLevel = 'normal' | 'attention' | 'late';
+
+/** RN-04.46 (CA-04.24): normal → attention → late, by the limits of the station. */
+export function timeLevel(
+  sentAt: Date,
+  limits: { attentionAfterMinutes: number; lateAfterMinutes: number },
+  now: Date,
+): TimeLevel {
+  if (now.getTime() >= afterSent(sentAt, limits.lateAfterMinutes).getTime()) {
+    return 'late';
+  }
+  if (now.getTime() >= afterSent(sentAt, limits.attentionAfterMinutes).getTime()) {
+    return 'attention';
+  }
+  return 'normal';
 }
 
 export function isLate(lateAt: Date | null, now: Date): boolean {

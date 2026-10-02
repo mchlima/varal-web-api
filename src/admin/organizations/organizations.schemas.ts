@@ -70,23 +70,24 @@ export const OrganizationUnitSchema = z
   .object({ id: z.uuid(), name: z.string(), active: z.boolean() })
   .meta({ id: 'OrganizationUnit' });
 
-export const OrganizationShiftSummarySchema = z
+export const OrganizationOperationDaySchema = z
   .object({
-    id: z.uuid(),
-    openedAt: z.iso.datetime(),
-    closedAt: z.iso.datetime().nullable(),
+    unitId: z.uuid(),
+    unitName: z.string(),
+    businessDate: z.iso.date().meta({ description: 'Dia de operação.' }),
+    salesCents: z.number().int().meta({ description: 'Venda do dia (spec 07, RN-07.01).' }),
   })
   .meta({
-    id: 'OrganizationShiftSummary',
-    description: 'Turno no detalhe da organização (spec 04).',
+    id: 'OrganizationOperationDay',
+    description: 'Dia de operação no detalhe da organização (spec 02, seção 4).',
   });
 
 export const OrganizationDetailSchema = OrganizationSummarySchema.extend({
   units: z.array(OrganizationUnitSchema),
   activeStaffCount: z.number().int(),
-  recentShifts: z
-    .array(OrganizationShiftSummarySchema)
-    .meta({ description: 'Últimos 10 turnos, do mais novo para o mais antigo.' }),
+  recentOperationDays: z
+    .array(OrganizationOperationDaySchema)
+    .meta({ description: 'Últimos 10 dias de operação (unidade, dia, venda), do mais novo.' }),
   lastAccessAt: z.iso.datetime().nullable().meta({
     description:
       'Último login ou renovação de sessão de qualquer usuário da organização (sem contar o "entrar como").',

@@ -19,17 +19,15 @@ export interface MetricsPeriod {
   end: Date;
 }
 
-/** Operational totals of one organization in a period (shifts and tabs, specs 04 to 06). */
+/** Operational totals of one organization in a period (specs 04 to 06). */
 interface OperationalTotals {
-  /** Shifts closed in the period. */
-  shifts: number;
-  /** Shifts opened in the period ("organizações ativas"). */
-  openedShifts: number;
+  /** Pairs (unit, day of operation) with a cash register opened in the period (spec 02, section 6). */
+  operationDays: number;
   tabs: number;
   soldCents: number;
 }
 
-const NO_TOTALS: OperationalTotals = { shifts: 0, openedShifts: 0, tabs: 0, soldCents: 0 };
+const NO_TOTALS: OperationalTotals = { operationDays: 0, tabs: 0, soldCents: 0 };
 
 function totalsOf(map: Map<string, OperationalTotals>, organizationId: string): OperationalTotals {
   let totals = map.get(organizationId);
@@ -71,7 +69,7 @@ export function resolvePeriod(
   };
 }
 
-/** Mondays of the weeks that touch the period (buckets of "turnos por semana"). */
+/** Mondays of the weeks that touch the period (buckets of "dias de operação por semana"). */
 export function weekStarts(period: MetricsPeriod): Temporal.PlainDate[] {
   const weeks: Temporal.PlainDate[] = [];
   let monday = period.from.subtract({ days: period.from.dayOfWeek - 1 });
@@ -85,9 +83,10 @@ export function weekStarts(period: MetricsPeriod): Temporal.PlainDate[] {
 /**
  * Usage metrics (spec 02, section 6), computed from existing data only (no table of their own).
  *
- * Shifts, tabs and sales come from specs 04 to 06 ({@link operationalTotals}): shifts closed in the
- * period, organizations with a shift opened in it, tabs paid, on credit or settled in it (by
- * `closed_at`) and the sum of their totals.
+ * Days of operation, tabs and sales come from specs 04 to 06 ({@link operationalTotals}): pairs
+ * (unit, day of operation) with a cash register session in the period (they replace the shifts,
+ * 2026-10-02), organizations with a register opened in it, tabs paid, on credit or settled in it (by
+ * the day of operation they were closed, `closed_business_date`) and the sum of their totals.
  */
 @Injectable()
 export class MetricsService {
@@ -97,7 +96,7 @@ export class MetricsService {
     const [byStatus, totals, closedByWeek] = await Promise.all([
       this.platform.organization.groupBy({ by: ['subscriptionStatus'], _count: { _all: true } }),
       this.operationalTotals(period),
-      this.shiftsByWeek(period),
+      this.operationDaysByWeek(period),
     ]);
     const organizationsByStatus = Object.fromEntries(
       Object.values(SubscriptionStatus).map((status) => [
@@ -111,11 +110,11 @@ export class MetricsService {
     return {
       period: this.periodOut(period),
       organizationsByStatus,
-      // Organizations with at least one shift opened in the period (spec 04).
-      activeOrganizations: all.filter((item) => item.openedShifts > 0).length,
-      shifts: {
-        total: all.reduce((sum, item) => sum + item.shifts, 0),
-        // Shifts closed per week (Monday in São Paulo).
+      // Organizations with at least one cash register opened in the period (spec 02, section 6).
+      activeOrganizations: all.filter((item) => item.operationDays > 0).length,
+      operationDays: {
+        total: all.reduce((sum, item) => sum + item.operationDays, 0),
+        // Days of operation per week (Monday of the day).
         byWeek: weekStarts(period).map((weekStart) => ({
           weekStart: weekStart.toString(),
           count: closedByWeek.get(weekStart.toString()) ?? 0,
@@ -129,7 +128,7 @@ export class MetricsService {
 
   async organizations(
     period: MetricsPeriod,
-    sort: 'name' | 'shifts' | 'tabs' | 'soldCents' | 'lastAccessAt',
+    sort: 'name' | 'operationDays' | 'tabs' | 'soldCents' | 'lastAccessAt',
     order: 'asc' | 'desc',
   ): Promise<{ period: ReturnType<MetricsService['periodOut']>; data: OrganizationUsage[] }> {
     const [organizations, totals, lastAccess] = await Promise.all([
@@ -153,7 +152,7 @@ export class MetricsService {
         organizationId: organization.id,
         name: organization.name,
         subscriptionStatus: organization.subscriptionStatus,
-        shifts: item.shifts,
+        operationDays: item.operationDays,
         tabs: item.tabs,
         soldCents: item.soldCents,
         lastAccessAt: lastAccessBy.get(organization.id)?.toISOString() ?? null,
@@ -182,15 +181,13 @@ export class MetricsService {
    * percentage rounded down), never from the current menu prices.
    */
   private async operationalTotals(period: MetricsPeriod): Promise<Map<string, OperationalTotals>> {
-    const { start, end } = period;
-    const [closed, opened, sold] = await Promise.all([
+    const from = period.from.toString();
+    const to = period.to.toString();
+    const [days, sold] = await Promise.all([
       this.platform.$queryRaw<{ organization_id: string; count: number }[]>`
-        SELECT organization_id, COUNT(*)::int AS count FROM shifts
-        WHERE status = 'closed' AND closed_at >= ${start} AND closed_at < ${end}
-        GROUP BY organization_id`,
-      this.platform.$queryRaw<{ organization_id: string; count: number }[]>`
-        SELECT organization_id, COUNT(*)::int AS count FROM shifts
-        WHERE opened_at >= ${start} AND opened_at < ${end}
+        SELECT organization_id, COUNT(DISTINCT (unit_id, business_date))::int AS count
+        FROM cash_register_sessions
+        WHERE business_date BETWEEN ${from}::date AND ${to}::date
         GROUP BY organization_id`,
       this.platform.$queryRaw<{ organization_id: string; tabs: number; sold_cents: bigint }[]>`
         WITH totals AS (
@@ -204,7 +201,7 @@ export class MetricsService {
             FROM order_item_modifiers GROUP BY order_item_id
           ) m ON m.order_item_id = oi.id
           WHERE t.status IN ('paid', 'on_credit', 'settled')
-            AND t.closed_at >= ${start} AND t.closed_at < ${end}
+            AND t.closed_business_date BETWEEN ${from}::date AND ${to}::date
           GROUP BY t.id
         )
         SELECT organization_id, COUNT(*)::int AS tabs,
@@ -215,11 +212,8 @@ export class MetricsService {
         FROM totals GROUP BY organization_id`,
     ]);
     const map = new Map<string, OperationalTotals>();
-    for (const row of closed) {
-      totalsOf(map, row.organization_id).shifts = row.count;
-    }
-    for (const row of opened) {
-      totalsOf(map, row.organization_id).openedShifts = row.count;
+    for (const row of days) {
+      totalsOf(map, row.organization_id).operationDays = row.count;
     }
     for (const row of sold) {
       const totals = totalsOf(map, row.organization_id);
@@ -229,14 +223,13 @@ export class MetricsService {
     return map;
   }
 
-  /** Shifts closed per week of the period, by the Monday (São Paulo) of the closing day. */
-  private async shiftsByWeek(period: MetricsPeriod): Promise<Map<string, number>> {
+  /** Days of operation per week of the period, by the Monday of the day of operation. */
+  private async operationDaysByWeek(period: MetricsPeriod): Promise<Map<string, number>> {
     const rows = await this.platform.$queryRaw<{ week_start: string; count: number }[]>`
-      SELECT to_char(date_trunc('week', closed_at AT TIME ZONE ${TIME_ZONE}), 'YYYY-MM-DD')
-               AS week_start,
-             COUNT(*)::int AS count
-      FROM shifts
-      WHERE status = 'closed' AND closed_at >= ${period.start} AND closed_at < ${period.end}
+      SELECT to_char(date_trunc('week', business_date), 'YYYY-MM-DD') AS week_start,
+             COUNT(DISTINCT (unit_id, business_date))::int AS count
+      FROM cash_register_sessions
+      WHERE business_date BETWEEN ${period.from.toString()}::date AND ${period.to.toString()}::date
       GROUP BY 1`;
     return new Map(rows.map((row) => [row.week_start, row.count]));
   }
@@ -245,7 +238,7 @@ export class MetricsService {
 function compareUsage(
   a: OrganizationUsage,
   b: OrganizationUsage,
-  sort: 'name' | 'shifts' | 'tabs' | 'soldCents' | 'lastAccessAt',
+  sort: 'name' | 'operationDays' | 'tabs' | 'soldCents' | 'lastAccessAt',
 ): number {
   switch (sort) {
     case 'name':

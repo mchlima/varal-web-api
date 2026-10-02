@@ -9,8 +9,9 @@ import {
   lateAtOf,
   lineTotalCents,
   type MenuProductForOrder,
+  pricedLine,
   tabTotals,
-  unitPriceFor,
+  timeLevel,
 } from './order-rules.js';
 
 const UNIT = '01920000-0000-7000-8000-000000000001';
@@ -128,11 +129,20 @@ describe('copy of what was sold (RN-04.18) and prices (RN-04.06)', () => {
     ]);
   });
 
-  it('CA-04.07: the shift price wins over the menu price, only for the products listed', () => {
-    const prices = new Map([['p-carne', 1000]]);
-    expect(unitPriceFor({ id: 'p-carne', priceCents: 1200 }, prices)).toBe(1000);
-    expect(unitPriceFor({ id: 'p-frango', priceCents: 900 }, prices)).toBe(900);
-    expect(unitPriceFor({ id: 'p-carne', priceCents: 1200 }, new Map())).toBe(1200);
+  it('CA-04.07, CA-03.09: the price of the effective list wins only for the products in it (RN-04.18)', () => {
+    const evento = { id: 'list-evento', prices: new Map([['p-carne', 1000]]) };
+    expect(pricedLine({ id: 'p-carne', priceCents: 1200 }, evento)).toEqual({
+      unitPriceCents: 1000,
+      priceListId: 'list-evento',
+    });
+    expect(pricedLine({ id: 'p-frango', priceCents: 900 }, evento)).toEqual({
+      unitPriceCents: 900,
+      priceListId: null,
+    });
+    expect(pricedLine({ id: 'p-carne', priceCents: 1200 }, null)).toEqual({
+      unitPriceCents: 1200,
+      priceListId: null,
+    });
   });
 });
 
@@ -167,8 +177,17 @@ describe('values (RN-04.14; spec 05, RN-05.03)', () => {
   });
 });
 
-describe('lateness (RN-04.23) and waste (RN-04.27)', () => {
+describe('lateness (RN-04.23, RN-04.46) and waste (RN-04.27)', () => {
   const sentAt = new Date('2026-10-01T20:00:00.000Z');
+
+  it('CA-04.24: normal, attention after 7 and late after 15 minutes; attention at 10 brings 8 minutes back', () => {
+    const at = (minutes: number) => new Date(sentAt.getTime() + minutes * 60_000);
+    const station = { attentionAfterMinutes: 7, lateAfterMinutes: 15 };
+    expect(timeLevel(sentAt, station, at(6))).toBe('normal');
+    expect(timeLevel(sentAt, station, at(8))).toBe('attention');
+    expect(timeLevel(sentAt, station, at(16))).toBe('late');
+    expect(timeLevel(sentAt, { ...station, attentionAfterMinutes: 10 }, at(8))).toBe('normal');
+  });
 
   it('CA-04.11: late after late_after_minutes since the order was sent', () => {
     const lateAt = lateAtOf({ canceledAt: null, inFinalStage: false, sentAt }, 15);

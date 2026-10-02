@@ -3,6 +3,7 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, inject, it, vi } from 'vitest';
 
 import { MetricsService, resolvePeriod } from '../../src/admin/metrics/metrics.service.js';
+import { dateColumn, todayInSaoPaulo } from '../../src/common/time.js';
 import {
   type AuthContext,
   requireOrganizationId,
@@ -10,8 +11,8 @@ import {
   systemContext,
 } from '../../src/context/request-context.js';
 import type {
-  CashRegisterDetailDto,
   CashRegisterDto,
+  CashRegisterSessionDetailDto,
   PaymentResultDto,
 } from '../../src/operation/cash.schemas.js';
 import type {
@@ -19,7 +20,8 @@ import type {
   CustomerDto,
   ReceivablesDto,
 } from '../../src/operation/credit.schemas.js';
-import type { ShiftDto, TabDto } from '../../src/operation/operation.schemas.js';
+import type { ContractedEventDto } from '../../src/operation/events.schemas.js';
+import type { TabDto } from '../../src/operation/operation.schemas.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
 import { PrismaService } from '../../src/prisma/prisma.service.js';
 import { RealtimeService } from '../../src/realtime/realtime.service.js';
@@ -52,7 +54,6 @@ interface Crew {
   counter: TestStaff;
   /** Cozinha only. */
   kitchen: TestStaff;
-  shift: ShiftDto;
 }
 
 const COUNTS = (informed: Record<string, number>) => ({
@@ -78,12 +79,16 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
     vi.unstubAllEnvs();
   });
 
-  /** A unit with an open shift where the skewer costs R$ 10,00. */
+  /** A unit with "Caixa 1" (closed) where the skewer costs R$ 10,00. */
   async function crew(label: string): Promise<Crew> {
     const tenant = await createTenant(platform, label);
     const setup = await setupOperation(platform, tenant);
+    await platform.product.update({
+      where: { id: setup.products.skewer },
+      data: { priceCents: 1000 },
+    });
     const { stations } = setup;
-    const c = {
+    return {
       setup,
       unitId: tenant.unitId,
       owner: tenant.ownerAuth,
@@ -93,19 +98,6 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       counter: await createStaff(platform, tenant, [stations.counter]),
       kitchen: await createStaff(platform, tenant, [stations.kitchen]),
     };
-    return { ...c, shift: await openShift(c) };
-  }
-
-  function openShift(c: Pick<Crew, 'setup' | 'unitId' | 'owner'>, body?: object) {
-    return ok<ShiftDto>(
-      'post',
-      `/units/${c.unitId}/shifts`,
-      c.owner,
-      body ?? {
-        type: 'direct_sale',
-        prices: [{ productId: c.setup.products.skewer, priceCents: 1000 }],
-      },
-    );
   }
 
   type Method = 'get' | 'post' | 'put' | 'patch' | 'delete';
@@ -153,14 +145,22 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
     };
   }
 
-  function openRegister(c: Crew, shiftId = c.shift.id) {
-    return ok<CashRegisterDto>('post', `/shifts/${shiftId}/cash-registers`, c.cashier.auth, {
+  /** Opens "Caixa 1" with no float; returns the register with its session. */
+  function openRegister(c: Crew) {
+    return ok<CashRegisterDto>('post', `/cash-registers/${c.setup.register}/open`, c.cashier.auth, {
       openingFloatCents: 0,
     });
   }
 
+  function sessionIdOf(register: CashRegisterDto): string {
+    if (!register.session) {
+      throw new Error('register without session');
+    }
+    return register.session.id;
+  }
+
   async function billedTab(c: Crew, quantity: number, customerName = 'Dona Marta') {
-    const tab = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs`, c.counter.auth, {
+    const tab = await ok<TabDto>('post', `/units/${c.unitId}/tabs`, c.counter.auth, {
       customerName,
     });
     await ok('post', `/tabs/${tab.id}/orders`, c.counter.auth, { items: [skewers(c, quantity)] });
@@ -191,25 +191,24 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
     return ok<ReceivablesDto>('get', `/units/${c.unitId}/receivables`, c.counter.auth);
   }
 
-  async function closeShift(c: Crew, registers: CashRegisterDto[]) {
-    for (const register of registers) {
-      const current = await ok<CashRegisterDetailDto>(
-        'get',
-        `/cash-registers/${register.id}`,
-        c.cashier.auth,
-      );
-      const informed = Object.fromEntries(
-        current.expected.map((row) => [row.method, row.expectedCents]),
-      );
-      await ok(
-        'post',
-        `/cash-registers/${register.id}/close`,
-        c.cashier.auth,
-        COUNTS(informed),
-        200,
-      );
-    }
-    await ok('post', `/shifts/${c.shift.id}/close`, c.owner, undefined, 200);
+  /** Closes the session with the expected values (no difference). */
+  async function closeRegister(c: Crew, register: CashRegisterDto) {
+    const sessionId = sessionIdOf(register);
+    const current = await ok<CashRegisterSessionDetailDto>(
+      'get',
+      `/cash-register-sessions/${sessionId}`,
+      c.cashier.auth,
+    );
+    const informed = Object.fromEntries(
+      current.expected.map((row) => [row.method, row.expectedCents]),
+    );
+    return ok<CashRegisterDto>(
+      'post',
+      `/cash-register-sessions/${sessionId}/close`,
+      c.cashier.auth,
+      COUNTS(informed),
+      200,
+    );
   }
 
   /** A tab of R$ 120,00 with R$ 20,00 paid, put on credit for a new customer (CA-06.01). */
@@ -506,7 +505,8 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
     it('CA-06.02, RN-06.04: an open tab is not put on credit; a customer is required', async () => {
       const c = await crew('Pendurar aberta');
       const customer = await createCustomer(c, { name: 'Lia' });
-      const open = await ok<TabDto>('post', `/shifts/${c.shift.id}/tabs`, c.counter.auth, {
+      await openRegister(c);
+      const open = await ok<TabDto>('post', `/units/${c.unitId}/tabs`, c.counter.auth, {
         customerName: 'Lia',
       });
       await fails(
@@ -563,32 +563,26 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       );
     });
 
-    it('RN-06.08: in a consumption_billed shift the tab of the contractor goes to a customer with their name', async () => {
-      const tenant = await createTenant(platform, 'Contratado');
-      const setup = await setupOperation(platform, tenant);
-      const shift = await openShift(
-        { setup, unitId: tenant.unitId, owner: tenant.ownerAuth },
-        {
-          type: 'contracted',
-          agreement: { contractorName: 'Empresa Alfa', modality: 'consumption_billed' },
-        },
-      );
-      const c: Crew = {
-        setup,
-        unitId: tenant.unitId,
-        owner: tenant.ownerAuth,
-        cashier: await createStaff(platform, tenant, [setup.stations.counter], {
-          canOperateCash: true,
-        }),
-        counter: await createStaff(platform, tenant, [setup.stations.counter]),
-        kitchen: await createStaff(platform, tenant, [setup.stations.kitchen]),
-        shift,
+    it('RN-06.08: in a consumption_billed event the tab of the contractor goes to a customer with their name', async () => {
+      const c = await crew('Contratado');
+      await openRegister(c);
+      const today = todayInSaoPaulo().toString();
+      const startEvent = async (contractorName: string) => {
+        const event = await ok<ContractedEventDto>('post', `/units/${c.unitId}/events`, c.owner, {
+          contractorName,
+          startsOn: today,
+          modality: 'consumption_billed',
+        });
+        await ok('post', `/events/${event.id}/start`, c.cashier.auth, {}, 200);
+        return event;
       };
+      const alfa = await startEvent('Empresa Alfa');
       const first = await billedTab(c, 3, 'Empresa Alfa');
+      expect(first.eventId).toBe(alfa.id);
       const hung = await putOnCredit(c, first.id, {});
       expect(hung.customer).toMatchObject({
         name: 'Empresa Alfa',
-        reference: 'Contratante de turno',
+        reference: 'Contratante de evento',
       });
       const second = await billedTab(c, 1, 'Empresa Alfa');
       const again = await putOnCredit(c, second.id, {});
@@ -596,26 +590,42 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       const list = await receivables(c);
       expect(list.customers).toHaveLength(1);
       expect(list.totalCents).toBe(first.totalCents + second.totalCents);
+
+      // A customer created before 2026-10-02 with the old reference is reused too.
+      await ok('post', `/events/${alfa.id}/finish`, c.cashier.auth, {}, 200);
+      // Without an event, a customer is required again.
+      const plain = await billedTab(c, 1, 'Sem evento');
+      await fails(
+        'post',
+        `/tabs/${plain.id}/put-on-credit`,
+        c.counter.auth,
+        {},
+        400,
+        'CUSTOMER_REQUIRED',
+      );
+      const legacy = await platform.customer.create({
+        data: {
+          organizationId: c.setup.tenant.organizationId,
+          unitId: c.unitId,
+          name: 'Empresa Beta',
+          reference: 'Contratante de turno',
+        },
+      });
+      await startEvent('Empresa Beta');
+      const beta = await billedTab(c, 1, 'Empresa Beta');
+      const betaHung = await putOnCredit(c, beta.id, {});
+      expect(betaHung.customer?.id).toBe(legacy.id);
     });
   });
 
   describe('settlement (section 5)', () => {
-    it('CA-06.03, RN-06.09, RN-06.10, RN-05.22: settled in the next shift, partially then fully, into that register and apart in the count', async () => {
+    it('CA-06.03, RN-06.09, RN-06.10, RN-05.22: settled on a next day, partially then fully, into the open register of that day and apart in the count', async () => {
       const c = await crew('Quitação');
       const { register, tab, customer } = await hungTab(c);
-      await closeShift(c, [register]);
+      expect(tab.closedBusinessDate).toBe(todayInSaoPaulo().toString());
+      await closeRegister(c, register);
 
-      // RN-06.09: no open shift in the unit.
-      await fails(
-        'post',
-        `/tabs/${tab.id}/payments`,
-        c.counter.auth,
-        { method: 'pix', amountCents: 6000 },
-        409,
-        'NO_SHIFT_OPEN',
-      );
-      const next = await openShift(c);
-      const nextCrew = { ...c, shift: next };
+      // RN-06.09: no open register in the unit.
       await fails(
         'post',
         `/tabs/${tab.id}/payments`,
@@ -624,25 +634,40 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
         409,
         'NO_CASH_REGISTER_OPEN',
       );
-      const newRegister = await openRegister(nextCrew);
-      // The register of the old shift is not accepted.
+      // The tab was of yesterday: the next register opens a new day (RN-04.29).
+      const yesterday = dateColumn(todayInSaoPaulo().subtract({ days: 1 }));
+      await platform.unit.update({ where: { id: c.unitId }, data: { businessDate: yesterday } });
+      await platform.tab.update({
+        where: { id: tab.id },
+        data: { businessDate: yesterday, closedBusinessDate: yesterday },
+      });
+      await platform.cashRegisterSession.update({
+        where: { id: sessionIdOf(register) },
+        data: { businessDate: yesterday },
+      });
+      const reopened = await openRegister(c);
+      const newSession = sessionIdOf(reopened);
+      expect(newSession).not.toBe(sessionIdOf(register));
+      expect(reopened.session?.businessDate).toBe(todayInSaoPaulo().toString());
+      // A register of another unit is not accepted.
+      const other = await crew('Quitação outra');
       await fails(
         'post',
         `/tabs/${tab.id}/payments`,
         c.counter.auth,
-        { method: 'pix', amountCents: 6000, cashRegisterId: register.id },
+        { method: 'pix', amountCents: 6000, cashRegisterId: other.setup.register },
         400,
         'INVALID_CASH_REGISTER',
       );
-      // A sale of the new shift, to show the settlements apart.
-      const sale = await billedTab(nextCrew, 3);
-      await pay(nextCrew, sale.id, { method: 'pix', amountCents: 3000 });
+      // A sale of today, to show the settlements apart.
+      const sale = await billedTab(c, 3);
+      await pay(c, sale.id, { method: 'pix', amountCents: 3000 });
 
       const partial = await pay(c, tab.id, { method: 'pix', amountCents: 6000 });
       expect(partial.payment).toMatchObject({
         isCreditSettlement: true,
-        shiftId: next.id,
-        cashRegisterId: newRegister.id,
+        cashRegisterId: c.setup.register,
+        cashRegisterSessionId: newSession,
       });
       expect(partial.tab).toMatchObject({ status: 'on_credit', balanceCents: 4000 });
       expect((await receivables(c)).totalCents).toBe(4000);
@@ -657,7 +682,11 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       );
       const full = await pay(c, tab.id, { method: 'cash', tenderedCents: 5000 });
       expect(full.payment).toMatchObject({ amountCents: 4000, changeCents: 1000 });
-      expect(full.tab).toMatchObject({ status: 'settled', balanceCents: 0 });
+      expect(full.tab).toMatchObject({
+        status: 'settled',
+        balanceCents: 0,
+        closedBusinessDate: yesterday.toISOString().slice(0, 10),
+      });
       expect(full.tab.settledAt).not.toBeNull();
       expect(await receivables(c)).toMatchObject({ totalCents: 0, tabs: [], customers: [] });
       await fails(
@@ -669,10 +698,10 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
         'TAB_NOTHING_TO_PAY',
       );
 
-      // RN-05.22: the register shows the settlements apart from the sales of the shift.
-      const detail = await ok<CashRegisterDetailDto>(
+      // RN-05.22: the session shows the settlements apart from the sales of the day.
+      const detail = await ok<CashRegisterSessionDetailDto>(
         'get',
-        `/cash-registers/${newRegister.id}`,
+        `/cash-register-sessions/${newSession}`,
         c.cashier.auth,
       );
       expect(detail.creditSettlementsCents).toBe(10_000);
@@ -688,17 +717,26 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       ).toEqual([6000, 4000]);
       const closed = await ok<CashRegisterDto>(
         'post',
-        `/cash-registers/${newRegister.id}/close`,
+        `/cash-register-sessions/${newSession}/close`,
         c.cashier.auth,
         COUNTS({ cash: 4000, pix: 9000 }),
         200,
       );
-      expect(closed.counts.map((row) => [row.method, row.creditSettlementsCents])).toEqual([
-        ['cash', 4000],
-        ['pix', 6000],
-        ['credit_card', 0],
-        ['debit_card', 0],
-      ]);
+      expect(closed.session?.counts.map((row) => [row.method, row.creditSettlementsCents])).toEqual(
+        [
+          ['cash', 4000],
+          ['pix', 6000],
+          ['credit_card', 0],
+          ['debit_card', 0],
+        ],
+      );
+      // The old session (where the tab was hung) did not change.
+      const old = await ok<CashRegisterSessionDetailDto>(
+        'get',
+        `/cash-register-sessions/${sessionIdOf(register)}`,
+        c.cashier.auth,
+      );
+      expect(old.creditSettlementsCents).toBe(0);
 
       // The history of the customer.
       const history = await ok<CustomerDetailDto>('get', `/customers/${customer.id}`, c.owner);
@@ -821,7 +859,7 @@ describe.skipIf(!databaseUrl)('fiado (spec 06)', () => {
       const metrics = app.get(MetricsService);
       const usage = await metrics.organizations(resolvePeriod({}), 'name', 'asc');
       const row = usage.data.find((item) => item.organizationId === c.setup.tenant.organizationId);
-      expect(row).toMatchObject({ tabs: 2, soldCents: tab.totalCents + 2000 });
+      expect(row).toMatchObject({ tabs: 2, soldCents: tab.totalCents + 2000, operationDays: 1 });
     });
   });
 

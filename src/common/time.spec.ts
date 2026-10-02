@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  dateColumn,
+  isoDateOf,
   nowInSaoPaulo,
+  plainDateOf,
   startOfDayInSaoPaulo,
   TIME_ZONE,
   toDate,
@@ -37,5 +40,15 @@ describe('time helpers (America/Sao_Paulo ↔ UTC Date at the edges)', () => {
     expect(startOfDayInSaoPaulo(Temporal.PlainDate.from('2026-10-01')).toISOString()).toBe(
       '2026-10-01T03:00:00.000Z',
     );
+  });
+});
+
+describe('date columns (day of operation, RN-04.29)', () => {
+  it('keeps the day of a `date` column without a time zone shift', () => {
+    const day = Temporal.PlainDate.from('2026-10-01');
+    const stored = dateColumn(day);
+    expect(stored.toISOString()).toBe('2026-10-01T00:00:00.000Z');
+    expect(plainDateOf(stored).equals(day)).toBe(true);
+    expect(isoDateOf(stored)).toBe('2026-10-01');
   });
 });

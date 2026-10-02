@@ -5,6 +5,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, inject, i
 
 import { hashPassword } from '../../src/auth/password-hasher.js';
 import { RateLimiter } from '../../src/auth/rate-limit.js';
+import { todayInSaoPaulo } from '../../src/common/time.js';
 import type { CashRegisterDto, PaymentResultDto } from '../../src/operation/cash.schemas.js';
 import {
   CashRegisterClosed,
@@ -14,17 +15,19 @@ import {
   OrderCreated,
   OrderItemCanceled,
   OrderItemStageChanged,
-  ShiftOpened,
+  ContractedEventUpdated,
   TabCreated,
   TabUpdated,
+  UnitOperationUpdated,
 } from '../../src/operation/operation-events.js';
+import type { ContractedEventDto } from '../../src/operation/events.schemas.js';
 import type {
   ItemChangeDto,
   OrderDto,
-  ShiftDto,
   TabDto,
   TabSummaryDto,
 } from '../../src/operation/operation.schemas.js';
+import type { UnitOperationDto } from '../../src/operation/unit-operation.schemas.js';
 import { PlatformPrismaService } from '../../src/prisma/platform-prisma.service.js';
 import {
   credentialsOf,
@@ -149,6 +152,13 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     };
   }
 
+  /** Opens "Caixa 1" of the unit (spec 05, RN-05.23). */
+  function openRegister(f: Floor, login: LoggedIn = f.owner, float = 0): Promise<CashRegisterDto> {
+    return post<CashRegisterDto>(login, `/cash-registers/${f.setup.register}/open`, {
+      openingFloatCents: float,
+    });
+  }
+
   function named<T>(events: Received[], name: string): Envelope<T>[] {
     return events
       .filter((event) => event.name === name)
@@ -168,20 +178,25 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     const delivery = await open(f.delivery, [unitRoom]);
     const stranger = await open(other.owner);
 
-    const opened = nextEvent<Envelope<ShiftDto>>(counter.socket, ShiftOpened.type, 2_000);
-    const shift = await post<ShiftDto>(f.owner, `/units/${setup.tenant.unitId}/shifts`, {
-      type: 'direct_sale',
-    });
+    const opened = nextEvent<Envelope<UnitOperationDto>>(
+      counter.socket,
+      UnitOperationUpdated.type,
+      2_000,
+    );
+    const register = await openRegister(f);
     await expect(opened).resolves.toMatchObject({
-      type: 'shift.opened',
+      type: 'unit.operation_updated',
       organizationId: setup.tenant.organizationId,
       unitId: setup.tenant.unitId,
-      version: shift.version,
-      data: { id: shift.id, status: 'open' },
+      data: {
+        unitId: setup.tenant.unitId,
+        inOperation: true,
+        cashRegisters: [{ id: register.id, session: { status: 'open' } }],
+      },
     });
 
     const tabCreated = nextEvent<Envelope<TabDto>>(counter.socket, TabCreated.type, 2_000);
-    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs`, {
+    const tab = await post<TabDto>(f.counter, `/units/${setup.tenant.unitId}/tabs`, {
       customerName: 'Dona Marta',
     });
     await expect(tabCreated).resolves.toMatchObject({
@@ -302,10 +317,8 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     const f = await floor('Sem commit');
     const counter = await open(f.counter);
     const kitchen = await open(f.kitchen);
-    const shift = await post<ShiftDto>(f.owner, `/units/${f.setup.tenant.unitId}/shifts`, {
-      type: 'direct_sale',
-    });
-    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs`, {
+    await openRegister(f);
+    const tab = await post<TabDto>(f.counter, `/units/${f.setup.tenant.unitId}/tabs`, {
       customerName: 'Seu João',
     });
     await settle(200);
@@ -333,10 +346,8 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
   it('phase 5 adjustment: a stage change that moves the ready or late counters emits tab.updated', async () => {
     const f = await floor('Contadores');
     const counter = await open(f.counter);
-    const shift = await post<ShiftDto>(f.owner, `/units/${f.setup.tenant.unitId}/shifts`, {
-      type: 'direct_sale',
-    });
-    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs`, {
+    await openRegister(f);
+    const tab = await post<TabDto>(f.counter, `/units/${f.setup.tenant.unitId}/tabs`, {
       customerName: 'Dona Marta',
     });
     const order = await post<OrderDto>(f.counter, `/tabs/${tab.id}/orders`, {
@@ -381,20 +392,19 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     const f = await floor('Paga antes em tempo real');
     const counter = await open(f.counter);
     const kitchen = await open(f.kitchen);
-    const shift = await post<ShiftDto>(f.owner, `/units/${f.setup.tenant.unitId}/shifts`, {
-      type: 'direct_sale',
-    });
-    const register = await post<CashRegisterDto>(f.counter, `/shifts/${shift.id}/cash-registers`, {
-      openingFloatCents: 5000,
-    });
+    const register = await openRegister(f, f.counter, 5000);
     const opened = await latest<CashRegisterDto>(counter.events, CashRegisterOpened.type);
-    expect(opened.data).toMatchObject({ id: register.id, name: 'Caixa 1' });
+    expect(opened.data).toMatchObject({
+      id: register.id,
+      name: 'Caixa 1',
+      session: { status: 'open', openingFloatCents: 5000 },
+    });
 
     const items = [
       { productId: f.setup.products.skewer, quantity: 1, modifierIds: [f.setup.modifiers.medium] },
     ];
     const refused = await http()
-      .post(`${API}/shifts/${shift.id}/tabs/pay-first`)
+      .post(`${API}/units/${f.setup.tenant.unitId}/tabs/pay-first`)
       .set(headers(f.counter))
       .send({ customerName: 'Lucas', items, payments: [{ method: 'pix', amountCents: 100 }] });
     expect(refused.status).toBe(409);
@@ -402,7 +412,7 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     expect(named(kitchen.events, OrderCreated.type)).toHaveLength(0);
     expect(named(counter.events, TabCreated.type)).toHaveLength(0);
 
-    const tab = await post<TabDto>(f.counter, `/shifts/${shift.id}/tabs/pay-first`, {
+    const tab = await post<TabDto>(f.counter, `/units/${f.setup.tenant.unitId}/tabs/pay-first`, {
       customerName: 'Lucas',
       items,
       payments: [{ method: 'cash', tenderedCents: 2000 }],
@@ -412,7 +422,7 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     const created = await latest<TabSummaryDto>(counter.events, TabCreated.type);
     expect(created.data).toMatchObject({ id: tab.id, status: 'paid', balanceCents: 0 });
     const cashUpdate = await latest<CashRegisterDto>(counter.events, CashRegisterUpdated.type);
-    expect(cashUpdate.data.cash.paymentsCents).toBe(1200);
+    expect(cashUpdate.data.session?.cash.paymentsCents).toBe(1200);
 
     // Reversal: tab.updated (back to closing) and cash_register.updated.
     const payment = tab.payments[0];
@@ -427,13 +437,82 @@ describe.skipIf(!databaseUrl)('operation in real time (spec 04, section 7.1)', (
     await settle(200);
     expect(named(counter.events, CashRegisterUpdated.type)).toHaveLength(2);
 
-    await post<CashRegisterDto>(f.counter, `/cash-registers/${register.id}/close`, {
-      counts: ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
-        method,
-        informedCents: method === 'cash' ? 5000 : 0,
-      })),
-    });
+    const operationClosed = nextEvent<Envelope<UnitOperationDto>>(
+      counter.socket,
+      UnitOperationUpdated.type,
+      2_000,
+    );
+    await post<CashRegisterDto>(
+      f.counter,
+      `/cash-register-sessions/${register.session?.id ?? ''}/close`,
+      {
+        counts: ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
+          method,
+          informedCents: method === 'cash' ? 5000 : 0,
+        })),
+      },
+    );
     const closed = await latest<CashRegisterDto>(counter.events, CashRegisterClosed.type);
-    expect(closed.data.status).toBe('closed');
+    expect(closed.data.session).toMatchObject({ status: 'closed', pendingTabsCount: 1 });
+    await expect(operationClosed).resolves.toMatchObject({ data: { inOperation: false } });
+  });
+
+  it('RN-04.31, RN-04.34: changing the current list and starting an event reach every counter (unit.operation_updated, event.updated)', async () => {
+    const f = await floor('Tabela em tempo real');
+    const counter = await open(f.counter);
+    const kitchen = await open(f.kitchen, [`unit:${f.setup.tenant.unitId}`]);
+    const list = await post<{ id: string }>(
+      f.owner,
+      `/units/${f.setup.tenant.unitId}/price-lists`,
+      {
+        name: 'Evento',
+      },
+    );
+    const changed = nextEvent<Envelope<UnitOperationDto>>(
+      counter.socket,
+      UnitOperationUpdated.type,
+      2_000,
+    );
+    const response = await http()
+      .put(`${API}/units/${f.setup.tenant.unitId}/current-price-list`)
+      .set(headers(f.counter))
+      .send({ priceListId: list.id });
+    expect(response.status, JSON.stringify(response.body)).toBe(200);
+    const operation = response.body as UnitOperationDto;
+    await expect(changed).resolves.toMatchObject({
+      version: operation.version,
+      data: { currentPriceList: { id: list.id, name: 'Evento' } },
+    });
+
+    const event = await post<ContractedEventDto>(
+      f.owner,
+      `/units/${f.setup.tenant.unitId}/events`,
+      {
+        contractorName: 'Festa',
+        startsOn: todayInSaoPaulo().toString(),
+        modality: 'other',
+      },
+    );
+    const updated = nextEvent<Envelope<ContractedEventDto>>(
+      counter.socket,
+      ContractedEventUpdated.type,
+      2_000,
+    );
+    const started = nextEvent<Envelope<UnitOperationDto>>(
+      counter.socket,
+      UnitOperationUpdated.type,
+      2_000,
+    );
+    await post(f.counter, `/events/${event.id}/start`);
+    await expect(updated).resolves.toMatchObject({
+      type: 'event.updated',
+      data: { id: event.id, status: 'in_progress' },
+    });
+    await expect(started).resolves.toMatchObject({
+      data: { eventInProgress: { id: event.id }, effectivePriceList: null },
+    });
+    await settle(200);
+    // Unit events never reach a station room.
+    expect(named(kitchen.events, UnitOperationUpdated.type)).toHaveLength(0);
   });
 });

@@ -89,7 +89,7 @@ export class ProductsService {
     });
   }
 
-  /** RN-03.12: allowed with an open shift; valid for new orders only. */
+  /** RN-03.12: allowed with an open cash register; valid for new orders only. */
   async update(productId: string, input: UpdateProductInput): Promise<ProductDto> {
     return this.prisma.transaction(async (db) => {
       const current = await db.product.findUnique({ where: { id: productId } });
@@ -183,7 +183,7 @@ export class ProductsService {
 
   /**
    * RN-03.11: marks or unmarks sold out, by the owner or staff with a station in the unit, at any
-   * time (open shift included). Emits `product.sold_out_changed` to the unit after the commit, so
+   * time (open cash register included). Emits `product.sold_out_changed` to the unit after the commit, so
    * every counter blocks the product without reloading (CA-03.05). Setting the current state again
    * changes nothing and emits nothing.
    */

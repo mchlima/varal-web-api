@@ -4,41 +4,34 @@ import { z } from 'zod';
 import { defineRealtimeEvent } from '../realtime/realtime.contracts.js';
 import { RealtimeService } from '../realtime/realtime.service.js';
 import { type CashRegisterDto, CashRegisterSchema } from './cash.schemas.js';
+import { type ContractedEventDto, ContractedEventSchema } from './events.schemas.js';
 import {
   type OrderDto,
   type OrderItemDto,
   OrderItemSchema,
   OrderSchema,
-  type ShiftDto,
-  ShiftSchema,
   type TabSummaryDto,
   TabSummarySchema,
 } from './operation.schemas.js';
+import { type UnitOperationDto, UnitOperationSchema } from './unit-operation.schemas.js';
 
 /*
  * Real-time events of the operation (spec 04, section 7.1). Envelope of spec 01, section 10, sent
  * after the commit to `unit:{unitId}` and, for items, to `station:{stationId}`.
  */
 
-export const ShiftOpened = defineRealtimeEvent(
-  'EventShiftOpened',
-  'shift.opened',
-  ShiftSchema,
-  'Turno aberto na unidade (sala `unit`). `version` é a versão do turno.',
+export const UnitOperationUpdated = defineRealtimeEvent(
+  'EventUnitOperationUpdated',
+  'unit.operation_updated',
+  UnitOperationSchema,
+  'Situação da operação da unidade (mesmo formato do `GET /units/{id}/operation`), sala `unit`. Sai ao abrir ou fechar caixa, trocar a tabela vigente, iniciar ou encerrar evento e mudar o dia de operação: os balcões recarregam os preços (spec 04, seção 7.1). `version` é a versão da operação.',
 );
 
-export const ShiftClosed = defineRealtimeEvent(
-  'EventShiftClosed',
-  'shift.closed',
-  ShiftSchema,
-  'Turno fechado (sala `unit`). Itens que ainda não estavam na etapa final foram levados a ela (RN-04.08): as filas das estações ficam vazias.',
-);
-
-export const ShiftUpdated = defineRealtimeEvent(
-  'EventShiftUpdated',
-  'shift.updated',
-  ShiftSchema,
-  'Proposta (não listado na spec 04): tabela de preços do turno alterada (RN-04.06). O balcão passa a mostrar os preços novos.',
+export const ContractedEventUpdated = defineRealtimeEvent(
+  'EventContractedEventUpdated',
+  'event.updated',
+  ContractedEventSchema,
+  'Evento contratado criado, alterado, iniciado, encerrado ou cancelado (sala `unit`). `version` é a do evento.',
 );
 
 export const TabCreated = defineRealtimeEvent(
@@ -109,30 +102,29 @@ export const CashRegisterOpened = defineRealtimeEvent(
   'EventCashRegisterOpened',
   'cash_register.opened',
   CashRegisterSchema,
-  'Caixa aberto no turno (sala `unit`, spec 05). `version` é a do caixa.',
+  'Caixa aberto: `session` é a abertura nova (sala `unit`, spec 05). `version` é a do caixa.',
 );
 
 export const CashRegisterUpdated = defineRealtimeEvent(
   'EventCashRegisterUpdated',
   'cash_register.updated',
   CashRegisterSchema,
-  'Esperado do caixa mudou: pagamento, estorno, sangria ou suprimento (sala `unit`, spec 05).',
+  'Caixa alterado: pagamento, estorno, sangria ou suprimento na abertura em andamento, ou o cadastro do caixa (sala `unit`, spec 05).',
 );
 
 export const CashRegisterClosed = defineRealtimeEvent(
   'EventCashRegisterClosed',
   'cash_register.closed',
   CashRegisterSchema,
-  'Caixa fechado, com a conferência em `counts` (sala `unit`, spec 05).',
+  'Caixa fechado: `session` é a abertura fechada, com a conferência em `counts` e os pendentes (sala `unit`, spec 05).',
 );
 
 export const operationEventSchemas: readonly z.ZodType[] = [
   CashRegisterOpened.schema,
   CashRegisterUpdated.schema,
   CashRegisterClosed.schema,
-  ShiftOpened.schema,
-  ShiftClosed.schema,
-  ShiftUpdated.schema,
+  UnitOperationUpdated.schema,
+  ContractedEventUpdated.schema,
   TabCreated.schema,
   TabUpdated.schema,
   OrderCreated.schema,
@@ -150,11 +142,20 @@ function distinctStations(...ids: (string | null)[]): string[] {
 export class OperationEvents {
   constructor(private readonly realtime: RealtimeService) {}
 
-  shift(
-    event: typeof ShiftOpened | typeof ShiftClosed | typeof ShiftUpdated,
-    shift: ShiftDto,
-  ): void {
-    this.realtime.emitToUnit(event, { unitId: shift.unitId, version: shift.version, data: shift });
+  operation(operation: UnitOperationDto): void {
+    this.realtime.emitToUnit(UnitOperationUpdated, {
+      unitId: operation.unitId,
+      version: operation.version,
+      data: operation,
+    });
+  }
+
+  contractedEvent(event: ContractedEventDto): void {
+    this.realtime.emitToUnit(ContractedEventUpdated, {
+      unitId: event.unitId,
+      version: event.version,
+      data: event,
+    });
   }
 
   tab(event: typeof TabCreated | typeof TabUpdated, tab: TabSummaryDto): void {

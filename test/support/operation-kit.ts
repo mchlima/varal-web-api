@@ -1,6 +1,6 @@
 /**
- * Operation in tests (spec 04): a unit with the default template, a "Fritadeira" station and a
- * small menu, plus staff members with chosen stations. Written through the unscoped client, like
+ * Operation in tests (spec 04): a unit with the default template (stations, workflow and "Caixa 1"),
+ * a "Fritadeira" station and a small menu, plus staff members with chosen stations. Written through the unscoped client, like
  * the seed.
  */
 import type { AuthContext } from '../../src/context/request-context.js';
@@ -10,6 +10,8 @@ import { type TemplateStations, withTemplate } from './setup-kit.js';
 
 export interface OperationSetup {
   tenant: Tenant;
+  /** "Caixa 1", created with the unit (RN-03.03, RN-05.17). */
+  register: string;
   stations: TemplateStations & { fryer: string };
   stages: { received: string; preparing: string; ready: string; delivered: string };
   products: {
@@ -31,7 +33,15 @@ export async function setupOperation(
   const template = await withTemplate(platform, tenant);
   const { organizationId, unitId } = tenant;
   const fryer = await platform.station.create({
-    data: { organizationId, unitId, name: 'Fritadeira', kind: 'queue', sortOrder: 4 },
+    data: {
+      organizationId,
+      unitId,
+      name: 'Fritadeira',
+      kind: 'queue',
+      sortOrder: 4,
+      attentionAfterMinutes: 7,
+      lateAfterMinutes: 15,
+    },
   });
   const stages = await platform.workflowStage.findMany({
     where: { organizationId, unitId },
@@ -91,8 +101,12 @@ export async function setupOperation(
   const medium = await modifier(doneness.id, 'Ao ponto', 0, 2);
   const farofa = await modifier(sides.id, 'Farofa', 0, 1);
   const garlicBread = await modifier(sides.id, 'Pão de alho', 300, 2);
+  const register = await platform.cashRegister.findFirstOrThrow({
+    where: { organizationId, unitId, name: 'Caixa 1' },
+  });
   return {
     tenant,
+    register: register.id,
     stations: { ...template, fryer: fryer.id },
     stages: {
       received: stageId(0),

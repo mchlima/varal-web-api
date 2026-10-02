@@ -5,6 +5,7 @@ import {
   HttpCode,
   HttpStatus,
   Param,
+  Patch,
   Post,
   Put,
   Query,
@@ -25,21 +26,30 @@ import { ErrorResponseSchema } from '../errors/error-response.schema.js';
 import { Idempotent } from '../idempotency/idempotent.decorator.js';
 import { IdPipe, NotFoundResponse } from '../units/unit-access.js';
 import {
+  ContractedEventActionRequestSchema,
+  type ContractedEventDto,
+  type ContractedEventListQuery,
+  ContractedEventListQuerySchema,
+  ContractedEventListSchema,
+  ContractedEventSchema,
+  CreateContractedEventRequestSchema,
+  UpdateContractedEventRequestSchema,
+} from './events.schemas.js';
+import { EventsService } from './events.service.js';
+import {
   AdvanceItemRequestSchema,
+  AdvanceOrderRequestSchema,
+  type AdvanceOrderResultDto,
+  AdvanceOrderResultSchema,
   BackItemRequestSchema,
   CancelItemRequestSchema,
   CancelTabRequestSchema,
   CreateOrderRequestSchema,
   CreateTabRequestSchema,
-  CurrentShiftSchema,
   type ItemChangeDto,
   ItemChangeSchema,
-  OpenShiftRequestSchema,
   type OrderDto,
   OrderSchema,
-  PutShiftPricesRequestSchema,
-  type ShiftDto,
-  ShiftSchema,
   type StationQueueDto,
   StationQueueSchema,
   TabActionRequestSchema,
@@ -52,8 +62,13 @@ import {
   tabStatusesOf,
 } from './operation.schemas.js';
 import { OrderItemsService } from './order-items.service.js';
-import { ShiftsService } from './shifts.service.js';
 import { TabsService } from './tabs.service.js';
+import {
+  PutCurrentPriceListRequestSchema,
+  type UnitOperationDto,
+  UnitOperationSchema,
+} from './unit-operation.schemas.js';
+import { UnitOperationService } from './unit-operation.service.js';
 
 function Forbidden(description: string): MethodDecorator {
   return ApiForbiddenResponse({
@@ -67,101 +82,192 @@ function Conflict(description: string): MethodDecorator {
 }
 
 const ITEM_CONFLICTS =
-  '`ITEM_CHANGED` (outro aparelho mudou o item antes: `details.item` traz o estado atual, CA-04.05), `ITEM_CANCELED`, `SHIFT_CLOSED`';
+  '`ITEM_CHANGED` (outro aparelho mudou o item antes: `details.item` traz o estado atual, CA-04.05), `ITEM_CANCELED`';
+
+const NO_REGISTER = '`NO_CASH_REGISTER_OPEN` (sem caixa aberto na unidade, RN-04.02, CA-04.01)';
 
 /**
- * Operation of a unit (spec 04): shifts, tabs, orders, items and station queues. Panel session
- * (owner or staff); permissions by unit and station are checked by the services.
+ * Operation of a unit (spec 04): the operation snapshot, the current price list, contracted
+ * events, tabs, orders, items and station queues. Panel session (owner or staff); permissions by
+ * unit and station are checked by the services.
  */
 @ApiTags('operation')
 @PanelAuth()
 @Controller()
 export class OperationController {
   constructor(
-    private readonly shifts: ShiftsService,
+    private readonly operation: UnitOperationService,
+    private readonly contractedEvents: EventsService,
     private readonly tabs: TabsService,
     private readonly items: OrderItemsService,
   ) {}
 
   // ---------------------------------------------------------------------------------------------
-  // Shifts
+  // Operation of the unit (spec 04, section 3)
   // ---------------------------------------------------------------------------------------------
 
-  @Post('units/:id/shifts')
+  @Get('units/:id/operation')
+  @ApiOperation({
+    summary:
+      'Situação da operação: dia de operação, caixas e aberturas, tabela vigente e efetiva, evento em andamento e de hoje, comandas em aberto, `staleTabs` (RN-01.28) e itens em preparo',
+  })
+  @ApiOkResponse({ standardSchema: UnitOperationSchema })
+  @NotFoundResponse()
+  @Forbidden('colaborador sem acesso à unidade.')
+  getOperation(@Param('id', IdPipe) id: string): Promise<UnitOperationDto> {
+    return this.operation.get(id);
+  }
+
+  @Put('units/:id/current-price-list')
   @Idempotent()
   @ApiOperation({
     summary:
-      'Abre o turno da unidade, com tipo, acordo e preços (dono ou quem opera caixa, RN-04.02)',
+      'Troca a tabela vigente (`priceListId` ou `null` para "Normal"), com ou sem caixa aberto (RN-04.31); vale para itens novos',
   })
-  @ApiCreatedResponse({ standardSchema: ShiftSchema })
+  @ApiOkResponse({ standardSchema: UnitOperationSchema })
   @NotFoundResponse()
-  @Forbidden('só o dono ou quem opera o caixa na unidade.')
+  @Forbidden('só o dono ou quem opera o caixa na unidade (RN-04.31).')
   @Conflict(
-    '`SHIFT_ALREADY_OPEN` (CA-04.01), `UNIT_INACTIVE`, `ORGANIZATION_SUSPENDED` ou `ORGANIZATION_CANCELED` (CA-02.05).',
+    '`EVENT_IN_PROGRESS` (a tabela é a do evento, RN-04.32, CA-04.14) ou `VERSION_CONFLICT`.',
   )
   @ApiBadRequestResponse({
-    description:
-      '`INVALID_SHIFT_PRICE` ou `VALIDATION_FAILED` (acordo obrigatório no turno contratado).',
+    description: '`INVALID_PRICE_LIST` (inexistente, de outra unidade ou inativa).',
     standardSchema: ErrorResponseSchema,
   })
-  openShift(
+  setCurrentPriceList(
     @Param('id', IdPipe) id: string,
-    @Body({ schema: OpenShiftRequestSchema }) body: z.infer<typeof OpenShiftRequestSchema>,
-  ): Promise<ShiftDto> {
-    return this.shifts.open(id, body);
+    @Body({ schema: PutCurrentPriceListRequestSchema })
+    body: z.infer<typeof PutCurrentPriceListRequestSchema>,
+  ): Promise<UnitOperationDto> {
+    return this.operation.setCurrentPriceList(id, body);
   }
 
-  @Get('units/:id/shifts/current')
-  @ApiOperation({ summary: 'Turno aberto da unidade, com acordo e preços' })
-  @ApiOkResponse({ standardSchema: CurrentShiftSchema })
-  @NotFoundResponse()
-  @Forbidden('colaborador sem acesso à unidade.')
-  async currentShift(@Param('id', IdPipe) id: string): Promise<{ shift: ShiftDto | null }> {
-    return { shift: await this.shifts.current(id) };
-  }
+  // ---------------------------------------------------------------------------------------------
+  // Contracted events (spec 04, section 3.3)
+  // ---------------------------------------------------------------------------------------------
 
-  @Put('shifts/:id/prices')
-  @Idempotent()
-  @ApiOperation({ summary: 'Substitui a tabela de preços do turno aberto (RN-04.06)' })
-  @ApiOkResponse({ standardSchema: ShiftSchema })
+  @Get('units/:id/events')
+  @ApiOperation({
+    summary:
+      'Eventos contratados da unidade: em andamento, agendados (mais próximos primeiro) e encerrados',
+  })
+  @ApiOkResponse({ standardSchema: ContractedEventListSchema })
   @NotFoundResponse()
   @Forbidden('só o dono ou quem opera o caixa na unidade.')
-  @Conflict('`SHIFT_CLOSED` ou `VERSION_CONFLICT`.')
-  @ApiBadRequestResponse({
-    description: '`INVALID_SHIFT_PRICE` ou `VALIDATION_FAILED`.',
-    standardSchema: ErrorResponseSchema,
-  })
-  updatePrices(
+  async listEvents(
     @Param('id', IdPipe) id: string,
-    @Body({ schema: PutShiftPricesRequestSchema })
-    body: z.infer<typeof PutShiftPricesRequestSchema>,
-  ): Promise<ShiftDto> {
-    return this.shifts.updatePrices(id, body);
+    @Query({ schema: ContractedEventListQuerySchema }) query: ContractedEventListQuery,
+  ): Promise<{ data: ContractedEventDto[] }> {
+    return { data: await this.contractedEvents.list(id, query) };
   }
 
-  @Post('shifts/:id/close')
+  @Post('units/:id/events')
+  @Idempotent()
+  @ApiOperation({ summary: 'Cadastra um evento contratado (dono; RN-04.05)' })
+  @ApiCreatedResponse({ standardSchema: ContractedEventSchema })
+  @NotFoundResponse()
+  @Forbidden('só o dono cadastra eventos.')
+  @ApiBadRequestResponse({
+    description: '`INVALID_PRICE_LIST` ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
+  createEvent(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: CreateContractedEventRequestSchema })
+    body: z.infer<typeof CreateContractedEventRequestSchema>,
+  ): Promise<ContractedEventDto> {
+    return this.contractedEvents.create(id, body);
+  }
+
+  @Get('events/:id')
+  @ApiOperation({ summary: 'Detalhe do evento contratado' })
+  @ApiOkResponse({ standardSchema: ContractedEventSchema })
+  @NotFoundResponse()
+  @Forbidden('só o dono ou quem opera o caixa na unidade.')
+  getEvent(@Param('id', IdPipe) id: string): Promise<ContractedEventDto> {
+    return this.contractedEvents.get(id);
+  }
+
+  @Patch('events/:id')
+  @ApiOperation({
+    summary: 'Edita o evento: acordo e tabela de preço até ele ser encerrado (dono; RN-04.37)',
+  })
+  @ApiOkResponse({ standardSchema: ContractedEventSchema })
+  @NotFoundResponse()
+  @Forbidden('só o dono edita eventos.')
+  @Conflict('`EVENT_CLOSED` ou `VERSION_CONFLICT`.')
+  @ApiBadRequestResponse({
+    description: '`INVALID_PRICE_LIST` ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
+  updateEvent(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: UpdateContractedEventRequestSchema })
+    body: z.infer<typeof UpdateContractedEventRequestSchema>,
+  ): Promise<ContractedEventDto> {
+    return this.contractedEvents.update(id, body);
+  }
+
+  @Post('events/:id/start')
   @Idempotent()
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary:
-      'Fecha o turno (RN-04.07): recusa com a lista de pendências; itens ainda em preparo vão à etapa final (RN-04.08)',
+      'Inicia o evento: comandas novas ficam ligadas a ele e usam a tabela dele (RN-04.34 a RN-04.36)',
   })
-  @ApiOkResponse({ standardSchema: ShiftSchema })
+  @ApiOkResponse({ standardSchema: ContractedEventSchema })
   @NotFoundResponse()
   @Forbidden('só o dono ou quem opera o caixa na unidade.')
-  @Conflict(
-    '`SHIFT_HAS_PENDING_ITEMS` com `details` no formato `ShiftPendingItems` (CA-04.09) ou `SHIFT_CLOSED`.',
-  )
-  closeShift(@Param('id', IdPipe) id: string): Promise<ShiftDto> {
-    return this.shifts.close(id);
+  @Conflict('`EVENT_ALREADY_IN_PROGRESS` (CA-04.15), `EVENT_NOT_SCHEDULED` ou `VERSION_CONFLICT`.')
+  startEvent(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: ContractedEventActionRequestSchema })
+    body: z.infer<typeof ContractedEventActionRequestSchema>,
+  ): Promise<ContractedEventDto> {
+    return this.contractedEvents.start(id, body.version);
+  }
+
+  @Post('events/:id/finish')
+  @Idempotent()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Encerra o evento em andamento (RN-04.34)' })
+  @ApiOkResponse({ standardSchema: ContractedEventSchema })
+  @NotFoundResponse()
+  @Forbidden('só o dono ou quem opera o caixa na unidade.')
+  @Conflict('`EVENT_NOT_IN_PROGRESS` ou `VERSION_CONFLICT`.')
+  finishEvent(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: ContractedEventActionRequestSchema })
+    body: z.infer<typeof ContractedEventActionRequestSchema>,
+  ): Promise<ContractedEventDto> {
+    return this.contractedEvents.finish(id, body.version);
+  }
+
+  @Post('events/:id/cancel')
+  @Idempotent()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Cancela um evento agendado (dono; RN-04.34)' })
+  @ApiOkResponse({ standardSchema: ContractedEventSchema })
+  @NotFoundResponse()
+  @Forbidden('só o dono cancela eventos.')
+  @Conflict('`EVENT_NOT_SCHEDULED` ou `VERSION_CONFLICT`.')
+  cancelEvent(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: ContractedEventActionRequestSchema })
+    body: z.infer<typeof ContractedEventActionRequestSchema>,
+  ): Promise<ContractedEventDto> {
+    return this.contractedEvents.cancel(id, body.version);
   }
 
   // ---------------------------------------------------------------------------------------------
   // Tabs
   // ---------------------------------------------------------------------------------------------
 
-  @Get('shifts/:id/tabs')
-  @ApiOperation({ summary: 'Varal: comandas do turno com totais e resumo dos itens, por número' })
+  @Get('units/:id/tabs')
+  @ApiOperation({
+    summary:
+      'Varal: comandas em aberto da unidade, de qualquer dia, com totais e resumo dos itens (as fechadas só do dia de operação atual)',
+  })
   @ApiOkResponse({ standardSchema: TabListSchema })
   @NotFoundResponse()
   @Forbidden('colaborador sem acesso à unidade.')
@@ -172,13 +278,16 @@ export class OperationController {
     return { data: await this.tabs.list(id, tabStatusesOf(query)) };
   }
 
-  @Post('shifts/:id/tabs')
+  @Post('units/:id/tabs')
   @Idempotent()
-  @ApiOperation({ summary: 'Abre uma comanda aberta com o próximo número do turno (RN-04.09)' })
+  @ApiOperation({
+    summary:
+      'Abre uma comanda aberta com o próximo número do dia, ligada ao evento em andamento (RN-04.02, RN-04.09, RN-04.36)',
+  })
   @ApiCreatedResponse({ standardSchema: TabSchema })
   @NotFoundResponse()
   @Forbidden('é preciso ter acesso ao balcão da unidade.')
-  @Conflict('`SHIFT_CLOSED`.')
+  @Conflict(`${NO_REGISTER}.`)
   createTab(
     @Param('id', IdPipe) id: string,
     @Body({ schema: CreateTabRequestSchema }) body: z.infer<typeof CreateTabRequestSchema>,
@@ -205,7 +314,7 @@ export class OperationController {
   @NotFoundResponse()
   @Forbidden('é preciso ter acesso ao balcão da unidade.')
   @Conflict(
-    '`ORDER_REJECTED` com `details` no formato `OrderRejectedDetails` (CA-04.06, CA-03.06), `TAB_NOT_OPEN` (RN-04.13), `TAB_CLOSED` ou `SHIFT_CLOSED`.',
+    `\`ORDER_REJECTED\` com \`details\` no formato \`OrderRejectedDetails\` (CA-04.06, CA-03.06), \`TAB_NOT_OPEN\` (RN-04.13), \`TAB_CLOSED\` ou ${NO_REGISTER}.`,
   )
   createOrder(
     @Param('id', IdPipe) id: string,
@@ -221,7 +330,7 @@ export class OperationController {
   @ApiOkResponse({ standardSchema: TabSchema })
   @NotFoundResponse()
   @Forbidden('é preciso ter acesso ao balcão da unidade.')
-  @Conflict('`TAB_NOT_OPEN`, `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.')
+  @Conflict('`TAB_NOT_OPEN`, `TAB_CLOSED` ou `TAB_CHANGED`.')
   requestBill(
     @Param('id', IdPipe) id: string,
     @Body({ schema: TabActionRequestSchema }) body: z.infer<typeof TabActionRequestSchema>,
@@ -236,7 +345,7 @@ export class OperationController {
   @ApiOkResponse({ standardSchema: TabSchema })
   @NotFoundResponse()
   @Forbidden('é preciso ter acesso ao balcão da unidade.')
-  @Conflict('`TAB_NOT_CLOSING`, `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.')
+  @Conflict('`TAB_NOT_CLOSING`, `TAB_CLOSED` ou `TAB_CHANGED`.')
   reopen(
     @Param('id', IdPipe) id: string,
     @Body({ schema: TabActionRequestSchema }) body: z.infer<typeof TabActionRequestSchema>,
@@ -254,7 +363,7 @@ export class OperationController {
   @NotFoundResponse()
   @Forbidden('é preciso ter acesso ao balcão da unidade.')
   @Conflict(
-    '`TAB_HAS_ACTIVE_ITEMS` (`details.itemIds`), `TAB_CLOSED`, `TAB_CHANGED` ou `SHIFT_CLOSED`.',
+    '`TAB_HAS_ACTIVE_ITEMS` (`details.itemIds`), `TAB_HAS_PAYMENTS`, `TAB_CLOSED` ou `TAB_CHANGED`.',
   )
   cancelTab(
     @Param('id', IdPipe) id: string,
@@ -268,7 +377,10 @@ export class OperationController {
   // ---------------------------------------------------------------------------------------------
 
   @Get('stations/:id/queue')
-  @ApiOperation({ summary: 'Fila da estação: itens nela, do pedido mais antigo para o mais novo' })
+  @ApiOperation({
+    summary:
+      'Fila da estação (KDS): um cartão por pedido, do mais antigo para o mais novo, com as linhas da estação (RN-04.40 a RN-04.45)',
+  })
   @ApiOkResponse({ standardSchema: StationQueueSchema })
   @NotFoundResponse()
   @Forbidden('colaborador sem acesso à estação.')
@@ -296,6 +408,26 @@ export class OperationController {
     @Body({ schema: AdvanceItemRequestSchema }) body: z.infer<typeof AdvanceItemRequestSchema>,
   ): Promise<ItemChangeDto> {
     return this.items.advance(id, body);
+  }
+
+  @Post('orders/:id/advance')
+  @Idempotent()
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary:
+      'Avança o pedido inteiro na estação: todas as linhas dele na estação (e etapa) vão à próxima etapa, tudo ou nada (RN-04.39, CA-04.17)',
+  })
+  @ApiOkResponse({ standardSchema: AdvanceOrderResultSchema })
+  @NotFoundResponse()
+  @Forbidden('sem acesso à estação.')
+  @Conflict(
+    '`ITEM_CHANGED` (alguma linha mudou ou faltou: `details.items` traz as linhas atuais), `ITEM_NOT_AT_STATION` ou `ITEM_IN_FINAL_STAGE`.',
+  )
+  advanceOrder(
+    @Param('id', IdPipe) id: string,
+    @Body({ schema: AdvanceOrderRequestSchema }) body: z.infer<typeof AdvanceOrderRequestSchema>,
+  ): Promise<AdvanceOrderResultDto> {
+    return this.items.advanceOrder(id, body);
   }
 
   @Post('order-items/:id/back')

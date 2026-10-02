@@ -30,9 +30,12 @@ export const MetricsOverviewSchema = z
     activeOrganizations: z
       .number()
       .int()
-      .meta({ description: 'Organizações com pelo menos um turno aberto no período.' }),
-    shifts: z.object({
-      total: z.number().int().meta({ description: 'Turnos fechados no período.' }),
+      .meta({ description: 'Organizações com pelo menos um caixa aberto no período.' }),
+    operationDays: z.object({
+      total: z.number().int().meta({
+        description:
+          'Dias de operação: pares (unidade, dia de operação) com caixa aberto no período (spec 02, seção 6).',
+      }),
       byWeek: z.array(
         z.object({
           weekStart: z.iso.date().meta({ description: 'Segunda-feira da semana.' }),
@@ -53,12 +56,12 @@ export const MetricsOverviewSchema = z
   .meta({
     id: 'MetricsOverview',
     description:
-      'Painel de métricas (spec 02, seção 6). Turnos e comandas vêm das specs 04 a 06; até lá ficam em zero.',
+      'Painel de métricas (spec 02, seção 6). Dias de operação e comandas vêm das specs 04 a 06.',
   });
 
 export const OrganizationUsageSortSchema = z.enum([
   'name',
-  'shifts',
+  'operationDays',
   'tabs',
   'soldCents',
   'lastAccessAt',
@@ -74,7 +77,7 @@ export const OrganizationUsageSchema = z
     organizationId: z.uuid(),
     name: z.string(),
     subscriptionStatus: SubscriptionStatusSchema,
-    shifts: z.number().int(),
+    operationDays: z.number().int().meta({ description: 'Dias de operação no período.' }),
     tabs: z.number().int(),
     soldCents: z.number().int(),
     lastAccessAt: z.iso.datetime().nullable(),

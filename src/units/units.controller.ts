@@ -45,8 +45,8 @@ import {
 import { UnitsService } from './units.service.js';
 import { WorkflowService } from './workflow.service.js';
 
-const SHIFT_OPEN_DOC =
-  '`SHIFT_OPEN`: a unidade está com turno aberto (CA-03.03); `VERSION_CONFLICT`; nomes repetidos (`*_NAME_TAKEN`); `STATION_KIND_REQUIRED` ou `STATION_IN_USE`.';
+const SETUP_BLOCKED_DOC =
+  '`CASH_REGISTER_OPEN` (caixa aberto) ou `ITEMS_IN_PROGRESS` (itens em preparo), CA-03.03; `VERSION_CONFLICT`; nomes repetidos (`*_NAME_TAKEN`); `STATION_KIND_REQUIRED` ou `STATION_IN_USE`. Mudar só os limites de tempo é permitido com caixa aberto (RN-03.25).';
 
 /**
  * Units, stations and workflow (spec 03, sections 3 and 4). Owner only, except reading the workflow:
@@ -87,12 +87,15 @@ export class UnitsController {
 
   @OwnerOnly()
   @Patch('units/:id')
-  @ApiOperation({ summary: 'Renomeia, ativa ou desativa a unidade e ajusta o tempo de atraso' })
+  @ApiOperation({
+    summary:
+      'Renomeia, ativa ou desativa a unidade e ajusta o atraso padrão das estações novas (RN-03.25)',
+  })
   @ApiOkResponse({ standardSchema: UnitSchema })
   @NotFoundResponse()
   @ApiConflictResponse({
     description:
-      '`SHIFT_OPEN` (RN-03.02), `LAST_ACTIVE_UNIT` (RN-03.01), `UNIT_NAME_TAKEN` ou `VERSION_CONFLICT`.',
+      '`CASH_REGISTER_OPEN` ou `UNIT_HAS_OPEN_TABS` (RN-03.02), `LAST_ACTIVE_UNIT` (RN-03.01), `UNIT_NAME_TAKEN` ou `VERSION_CONFLICT`.',
     standardSchema: ErrorResponseSchema,
   })
   updateUnit(
@@ -114,10 +117,16 @@ export class UnitsController {
   @OwnerOnly()
   @Post('units/:id/stations')
   @Idempotent()
-  @ApiOperation({ summary: 'Cria uma estação na unidade' })
+  @ApiOperation({
+    summary: 'Cria uma estação na unidade; as de fila com limites de atenção e atraso (RN-03.25)',
+  })
   @ApiCreatedResponse({ standardSchema: StationSchema })
   @NotFoundResponse()
-  @ApiConflictResponse({ description: SHIFT_OPEN_DOC, standardSchema: ErrorResponseSchema })
+  @ApiConflictResponse({ description: SETUP_BLOCKED_DOC, standardSchema: ErrorResponseSchema })
+  @ApiBadRequestResponse({
+    description: '`INVALID_TIME_LIMITS` (CA-03.12) ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
   createStation(
     @Param('id', IdPipe) id: string,
     @Body({ schema: CreateStationRequestSchema }) body: z.infer<typeof CreateStationRequestSchema>,
@@ -127,10 +136,16 @@ export class UnitsController {
 
   @OwnerOnly()
   @Patch('stations/:id')
-  @ApiOperation({ summary: 'Altera uma estação (nome, tipo, ordem, ativa)' })
+  @ApiOperation({
+    summary: 'Altera uma estação (nome, tipo, ordem, ativa, limites de atenção e atraso)',
+  })
   @ApiOkResponse({ standardSchema: StationSchema })
   @NotFoundResponse()
-  @ApiConflictResponse({ description: SHIFT_OPEN_DOC, standardSchema: ErrorResponseSchema })
+  @ApiConflictResponse({ description: SETUP_BLOCKED_DOC, standardSchema: ErrorResponseSchema })
+  @ApiBadRequestResponse({
+    description: '`INVALID_TIME_LIMITS` (CA-03.12) ou `VALIDATION_FAILED`.',
+    standardSchema: ErrorResponseSchema,
+  })
   updateStation(
     @Param('id', IdPipe) id: string,
     @Body({ schema: UpdateStationRequestSchema }) body: z.infer<typeof UpdateStationRequestSchema>,
@@ -168,7 +183,8 @@ export class UnitsController {
     standardSchema: ErrorResponseSchema,
   })
   @ApiConflictResponse({
-    description: '`SHIFT_OPEN` (CA-03.03) ou `VERSION_CONFLICT`.',
+    description:
+      '`CASH_REGISTER_OPEN` ou `ITEMS_IN_PROGRESS` (CA-03.03, RN-03.07) ou `VERSION_CONFLICT`.',
     standardSchema: ErrorResponseSchema,
   })
   saveWorkflow(

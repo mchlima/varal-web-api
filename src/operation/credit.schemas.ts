@@ -139,7 +139,7 @@ export const PutOnCreditRequestSchema = z
   .object({
     customerId: z.uuid().optional().meta({
       description:
-        'Cliente da unidade (RN-06.05). Opcional só no turno contratado `consumption_billed`: sem ele, a comanda vai para o cliente com o nome do contratante, criado se preciso (RN-06.08).',
+        'Cliente da unidade (RN-06.05). Opcional só na comanda de um evento `consumption_billed`: sem ele, a comanda vai para o cliente com o nome do contratante, criado se preciso (RN-06.08).',
     }),
     version: z.int().min(0).optional().meta({
       description: 'Versão da comanda que o aparelho tem (opcional; `TAB_CHANGED`).',

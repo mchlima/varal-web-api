@@ -26,16 +26,22 @@ export const TENANT_MODELS = {
   AnnouncementTarget: 'organizationId',
   AnnouncementRead: 'organizationId',
   ImpersonationSession: 'organizationId',
-  // Spec 04: shifts, tabs, orders and items.
-  Shift: 'organizationId',
-  ShiftAgreement: 'organizationId',
-  ShiftPrice: 'organizationId',
+  // Spec 03: price lists.
+  PriceList: 'organizationId',
+  ProductPrice: 'organizationId',
+  // Spec 04: events, tabs, orders and items.
+  ContractedEvent: 'organizationId',
   Tab: 'organizationId',
   Order: 'organizationId',
   OrderItem: 'organizationId',
   OrderItemModifier: 'organizationId',
-  // Spec 05: cash registers, movements, counts and payments.
+  // Legacy shifts (read only until the contraction migration, plan phase 7.5).
+  Shift: 'organizationId',
+  ShiftAgreement: 'organizationId',
+  ShiftPrice: 'organizationId',
+  // Spec 05: cash registers, sessions, movements, counts and payments.
   CashRegister: 'organizationId',
+  CashRegisterSession: 'organizationId',
   CashMovement: 'organizationId',
   CashRegisterCount: 'organizationId',
   Payment: 'organizationId',

@@ -115,7 +115,20 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
         .get(`${API}/units/${unit.id}/menu`)
         .set(as(tenantA.ownerAuth))
         .expect(200);
-      expect(menu.body).toMatchObject({ unitId: unit.id, categories: [] });
+      expect(menu.body).toMatchObject({ unitId: unit.id, categories: [], priceLists: [] });
+
+      // CA-03.11: the unit is born with "Caixa 1" active and no price list (current: "Normal").
+      const registers = await http()
+        .get(`${API}/units/${unit.id}/cash-registers`)
+        .set(as(tenantA.ownerAuth))
+        .expect(200);
+      expect(
+        (registers.body as { data: { name: string; active: boolean; session: unknown }[] }).data,
+      ).toEqual([expect.objectContaining({ name: 'Caixa 1', active: true, session: null })]);
+      expect(menu.body).toMatchObject({
+        currentPriceListId: null,
+        effectivePriceListName: 'Normal',
+      });
 
       const audit = await platform.auditLog.findMany({
         where: { entityType: 'unit', entityId: unit.id },
@@ -138,9 +151,16 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
       );
       expect(first.applied).toBe(true);
       expect(first.stationIds).toHaveLength(DEFAULT_TEMPLATE.stations.length);
-      expect(second).toEqual({ applied: false, stationIds: [], stageIds: [] });
+      expect(first.cashRegisterId).not.toBeNull();
+      expect(second).toEqual({
+        applied: false,
+        stationIds: [],
+        stageIds: [],
+        cashRegisterId: null,
+      });
       expect(await platform.station.count({ where: { unitId: unit.id } })).toBe(3);
       expect(await platform.workflowStage.count({ where: { unitId: unit.id } })).toBe(4);
+      expect(await platform.cashRegister.count({ where: { unitId: unit.id } })).toBe(1);
 
       await expect(
         platform.$transaction((tx) =>
@@ -403,7 +423,7 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
       expect(workflow.stages[2]?.id).toBe(ready?.id);
       expect(workflow.stages[3]?.id).toBe(delivered?.id);
 
-      // "Preparando" is archived, not deleted (items of past shifts keep pointing to it).
+      // "Preparando" is archived, not deleted (items of past days keep pointing to it).
       const archived = await platform.workflowStage.findUniqueOrThrow({
         where: { id: preparing?.id ?? '' },
       });
@@ -437,9 +457,70 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
     });
   });
 
-  describe('open shift (RN-03.02, RN-03.07, RN-03.11, RN-03.12)', () => {
-    it('CA-03.03: with an open shift, workflow and stations are refused with SHIFT_OPEN; menu changes go through', async () => {
-      const { tenant, stations } = await freshTenant('Turno aberto');
+  describe('time limits of the stations (RN-03.25)', () => {
+    it('CA-03.12: a new station of a unit with 15 minutes has attention 7 and delay 15; attention >= delay is refused', async () => {
+      const { tenant } = await freshTenant('Limites');
+      const created = await http()
+        .post(`${API}/units/${tenant.unitId}/stations`)
+        .set(as(tenant.ownerAuth))
+        .send({ name: 'Fritadeira', kind: 'queue' })
+        .expect(201);
+      const station = created.body as {
+        id: string;
+        attentionAfterMinutes: number;
+        lateAfterMinutes: number;
+      };
+      expect(station).toMatchObject({ attentionAfterMinutes: 7, lateAfterMinutes: 15 });
+
+      for (const body of [
+        { attentionAfterMinutes: 15 },
+        { attentionAfterMinutes: 20, lateAfterMinutes: 18 },
+      ]) {
+        const refused = await http()
+          .patch(`${API}/stations/${station.id}`)
+          .set(as(tenant.ownerAuth))
+          .send(body)
+          .expect(400);
+        expect(errorOf(refused).code).toBe('INVALID_TIME_LIMITS');
+      }
+      const counter = await http()
+        .post(`${API}/units/${tenant.unitId}/stations`)
+        .set(as(tenant.ownerAuth))
+        .send({ name: 'Balcão 2', kind: 'counter', lateAfterMinutes: 20 })
+        .expect(400);
+      expect(errorOf(counter).code).toBe('INVALID_TIME_LIMITS');
+
+      const changed = await http()
+        .patch(`${API}/stations/${station.id}`)
+        .set(as(tenant.ownerAuth))
+        .send({ attentionAfterMinutes: 10, lateAfterMinutes: 20 })
+        .expect(200);
+      expect(changed.body).toMatchObject({ attentionAfterMinutes: 10, lateAfterMinutes: 20 });
+
+      // The template stations also have the limits; the counter has none.
+      const list = await http()
+        .get(`${API}/units/${tenant.unitId}/stations`)
+        .set(as(tenant.ownerAuth))
+        .expect(200);
+      const byName = new Map(
+        (
+          list.body as {
+            data: {
+              name: string;
+              attentionAfterMinutes: number | null;
+              lateAfterMinutes: number | null;
+            }[];
+          }
+        ).data.map((row) => [row.name, [row.attentionAfterMinutes, row.lateAfterMinutes]]),
+      );
+      expect(byName.get('Balcão')).toEqual([null, null]);
+      expect(byName.get('Cozinha')).toEqual([7, 15]);
+    });
+  });
+
+  describe('open cash register (RN-03.02, RN-03.07, RN-03.11, RN-03.12)', () => {
+    it('CA-03.03: with an open cash register, workflow and stations are refused with CASH_REGISTER_OPEN; limits and menu changes go through; then ITEMS_IN_PROGRESS', async () => {
+      const { tenant, stations } = await freshTenant('Caixa aberto');
       const category = await http()
         .post(`${API}/categories`)
         .set(as(tenant.ownerAuth))
@@ -452,14 +533,17 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
         .expect(201);
       const productId = (product.body as { id: string }).id;
       const workflow = await workflowOf(tenant);
+      const register = await platform.cashRegister.findFirstOrThrow({
+        where: { unitId: tenant.unitId },
+      });
 
-      // A real open shift (spec 04) replaces the provisional checker of spec 03.
-      await http()
-        .post(`${API}/units/${tenant.unitId}/shifts`)
+      const opened = await http()
+        .post(`${API}/cash-registers/${register.id}/open`)
         .set(as(tenant.ownerAuth))
-        .send({ type: 'direct_sale' })
+        .send({ openingFloatCents: 0 })
         .expect(201);
-      const refused = await Promise.all([
+      const sessionId = (opened.body as { session: { id: string } }).session.id;
+      const saveWorkflow = () =>
         http()
           .put(`${API}/units/${tenant.unitId}/workflow`)
           .set(as(tenant.ownerAuth))
@@ -470,7 +554,9 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
               target,
               stationId,
             })),
-          }),
+          });
+      const refused = await Promise.all([
+        saveWorkflow(),
         http()
           .post(`${API}/units/${tenant.unitId}/stations`)
           .set(as(tenant.ownerAuth))
@@ -482,8 +568,14 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
       ]);
       for (const response of refused) {
         expect(response.status).toBe(409);
-        expect(errorOf(response).code).toBe('SHIFT_OPEN');
+        expect(errorOf(response).code).toBe('CASH_REGISTER_OPEN');
       }
+      // RN-03.25: only the time limits change with the register open (they apply at once).
+      await http()
+        .patch(`${API}/stations/${stations.kitchen}`)
+        .set(as(tenant.ownerAuth))
+        .send({ attentionAfterMinutes: 5 })
+        .expect(200);
       // RN-03.02: the unit is not deactivated (a second unit exists, so RN-03.01 is not the cause).
       await http()
         .post(`${API}/units`)
@@ -495,18 +587,48 @@ describe.skipIf(!databaseUrl)('units, stations and workflow (spec 03, sections 3
         .set(as(tenant.ownerAuth))
         .send({ active: false })
         .expect(409);
-      expect(errorOf(deactivate).code).toBe('SHIFT_OPEN');
+      expect(errorOf(deactivate).code).toBe('CASH_REGISTER_OPEN');
 
-      // RN-03.12 and RN-03.11: price and sold-out change with the shift open.
+      // RN-03.12 and RN-03.11: price and sold-out change with the register open.
       await http()
         .patch(`${API}/products/${productId}`)
         .set(as(tenant.ownerAuth))
         .send({ priceCents: 1300 })
         .expect(200);
+
+      // An item in preparation of an open tab blocks the flow after the register closes.
+      const tab = await http()
+        .post(`${API}/units/${tenant.unitId}/tabs`)
+        .set(as(tenant.ownerAuth))
+        .send({ customerName: 'Dona Marta' })
+        .expect(201);
+      await http()
+        .post(`${API}/tabs/${(tab.body as { id: string }).id}/orders`)
+        .set(as(tenant.ownerAuth))
+        .send({ items: [{ productId, quantity: 1 }] })
+        .expect(201);
       await http()
         .post(`${API}/products/${productId}/sold-out`)
         .set(as(tenant.ownerAuth))
         .expect(200);
+      const counts = ['cash', 'pix', 'credit_card', 'debit_card'].map((method) => ({
+        method,
+        informedCents: 0,
+      }));
+      await http()
+        .post(`${API}/cash-register-sessions/${sessionId}/close`)
+        .set(as(tenant.ownerAuth))
+        .send({ counts, finishPendingItems: false })
+        .expect(200);
+      const inProgress = await saveWorkflow().expect(409);
+      expect(errorOf(inProgress).code).toBe('ITEMS_IN_PROGRESS');
+      // RN-03.02: open tabs keep the unit active.
+      const withTabs = await http()
+        .patch(`${API}/units/${tenant.unitId}`)
+        .set(as(tenant.ownerAuth))
+        .send({ active: false })
+        .expect(409);
+      expect(errorOf(withTabs).code).toBe('UNIT_HAS_OPEN_TABS');
     });
   });
 

@@ -8,7 +8,7 @@ import { AppError } from '../errors/app-error.js';
 import type { Unit } from '../generated/prisma/client.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
 import { RealtimeService } from '../realtime/realtime.service.js';
-import { OpenShiftChecker } from './open-shift.js';
+import { OperationGuard } from './operation-guard.js';
 import { setupError } from './setup-errors.js';
 import { SetupEvents } from './setup-events.js';
 import { UnitTemplateService } from './unit-template.service.js';
@@ -54,7 +54,7 @@ export class UnitsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly template: UnitTemplateService,
-    private readonly shifts: OpenShiftChecker,
+    private readonly guard: OperationGuard,
     private readonly events: SetupEvents,
     private readonly realtime: RealtimeService,
   ) {}
@@ -67,8 +67,8 @@ export class UnitsService {
   }
 
   /**
-   * RN-03.03: a new unit is born with the default stations and workflow (CA-03.01) and an empty
-   * menu, in the same transaction.
+   * RN-03.03: a new unit is born with the default stations and workflow (CA-03.01), the register
+   * "Caixa 1" (CA-03.11), an empty menu and no price list, in the same transaction.
    */
   async create(input: CreateUnitInput): Promise<UnitDto> {
     return this.prisma.transaction(async (db) => {
@@ -97,8 +97,9 @@ export class UnitsService {
   }
 
   /**
-   * Renames, (de)activates and sets `late_after_minutes`. RN-03.02: a unit with an open shift is
-   * not deactivated; RN-03.01: the last active unit is not deactivated.
+   * Renames, (de)activates and sets `late_after_minutes` (the default of new stations, RN-03.25).
+   * RN-03.02: a unit with an open cash register or open tabs is not deactivated; RN-03.01: the last
+   * active unit is not deactivated.
    */
   async update(unitId: string, input: UpdateUnitInput): Promise<UnitDto> {
     return this.prisma.transaction(async (db) => {
@@ -108,7 +109,7 @@ export class UnitsService {
       }
       const deactivating = input.active === false && current.active;
       if (deactivating) {
-        await this.shifts.assertNoOpenShift(db, unitId);
+        await this.guard.assertCanDeactivate(db, unitId);
         const others = await db.unit.count({ where: { active: true, id: { not: unitId } } });
         if (others === 0) {
           throw setupError('LAST_ACTIVE_UNIT');

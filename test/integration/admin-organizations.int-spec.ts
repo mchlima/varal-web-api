@@ -111,19 +111,51 @@ describe.skipIf(!databaseUrl)('organizations and subscription (spec 02, section 
       ).toBe(true);
     });
 
-    it('CA-02.04: the first unit is born with the default template (Balcão, Cozinha, Balcão de entrega; 4 stages)', async () => {
+    it('CA-02.04, CA-03.11: the first unit is born with the default template (Balcão, Cozinha, Balcão de entrega; 4 stages; "Caixa 1")', async () => {
       const body = await create(newOrganization('Template'));
       const unitId = body.units[0]?.id ?? '';
       const stations = await platform.station.findMany({
         where: { unitId },
         orderBy: { sortOrder: 'asc' },
-        select: { name: true, kind: true, organizationId: true },
+        select: {
+          name: true,
+          kind: true,
+          organizationId: true,
+          attentionAfterMinutes: true,
+          lateAfterMinutes: true,
+        },
       });
+      // RN-03.25 (CA-03.12): queue stations get the delay of the unit (15) and half of it.
       expect(stations).toEqual([
-        { name: 'Balcão', kind: 'counter', organizationId: body.id },
-        { name: 'Cozinha', kind: 'queue', organizationId: body.id },
-        { name: 'Balcão de entrega', kind: 'queue', organizationId: body.id },
+        {
+          name: 'Balcão',
+          kind: 'counter',
+          organizationId: body.id,
+          attentionAfterMinutes: null,
+          lateAfterMinutes: null,
+        },
+        {
+          name: 'Cozinha',
+          kind: 'queue',
+          organizationId: body.id,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
+        },
+        {
+          name: 'Balcão de entrega',
+          kind: 'queue',
+          organizationId: body.id,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
+        },
       ]);
+      // RN-03.03, RN-05.17: one active register "Caixa 1" and no price list.
+      const registers = await platform.cashRegister.findMany({
+        where: { unitId },
+        select: { name: true, active: true, organizationId: true },
+      });
+      expect(registers).toEqual([{ name: 'Caixa 1', active: true, organizationId: body.id }]);
+      await expect(platform.priceList.count({ where: { unitId } })).resolves.toBe(0);
       const stages = await platform.workflowStage.findMany({
         where: { unitId },
         orderBy: { sortOrder: 'asc' },
@@ -241,17 +273,110 @@ describe.skipIf(!databaseUrl)('organizations and subscription (spec 02, section 
       expect(next.data[0]?.id).toBe(a.id);
     });
 
-    it('detail has units, active staff, shifts (spec 04), last access and unread announcements', async () => {
+    it('detail has units, active staff, the last days of operation (spec 02, section 4), last access and unread announcements', async () => {
       const body = await create();
       const detail = await admin.call('get', `${API}/admin/organizations/${body.id}`).expect(200);
       expect(detail.body).toMatchObject({
         id: body.id,
         units: [{ id: body.units[0]?.id }],
         activeStaffCount: 0,
-        recentShifts: [],
+        recentOperationDays: [],
         lastAccessAt: null,
         unreadAnnouncements: expect.any(Number) as number,
       });
+
+      // Two days of operation of "Caixa 1"; on the second, a tab of R$ 18,00 paid.
+      const organizationId = body.id;
+      const unitId = body.units[0]?.id ?? '';
+      const register = await platform.cashRegister.findFirstOrThrow({ where: { unitId } });
+      const session = (businessDate: string) =>
+        platform.cashRegisterSession.create({
+          data: {
+            organizationId,
+            unitId,
+            cashRegisterId: register.id,
+            businessDate: new Date(`${businessDate}T00:00:00Z`),
+            status: 'closed',
+            openingFloatCents: 0,
+            openedByType: 'system',
+            openedAt: new Date(`${businessDate}T20:00:00Z`),
+            closedByType: 'system',
+            closedAt: new Date(`${businessDate}T23:00:00Z`),
+          },
+        });
+      await session('2026-09-01');
+      await session('2026-09-02');
+      const kitchen = await platform.station.findFirstOrThrow({
+        where: { unitId, name: 'Cozinha' },
+      });
+      const final = await platform.workflowStage.findFirstOrThrow({
+        where: { unitId, isFinal: true },
+      });
+      const category = await platform.category.create({
+        data: {
+          organizationId,
+          unitId,
+          name: 'Bebidas',
+          sortOrder: 1,
+          defaultStationId: kitchen.id,
+        },
+      });
+      const product = await platform.product.create({
+        data: {
+          organizationId,
+          unitId,
+          categoryId: category.id,
+          name: 'Refri',
+          priceCents: 600,
+          sortOrder: 1,
+        },
+      });
+      const tab = await platform.tab.create({
+        data: {
+          organizationId,
+          unitId,
+          number: 1,
+          businessDate: new Date('2026-09-02T00:00:00Z'),
+          closedBusinessDate: new Date('2026-09-02T00:00:00Z'),
+          customerName: 'Mesa',
+          mode: 'open_tab',
+          status: 'paid',
+          openedByType: 'system',
+          closedAt: new Date('2026-09-02T22:00:00Z'),
+        },
+      });
+      const order = await platform.order.create({
+        data: {
+          organizationId,
+          tabId: tab.id,
+          numberInTab: 1,
+          status: 'completed',
+          createdByType: 'system',
+          sentAt: new Date('2026-09-02T21:00:00Z'),
+          completedAt: new Date('2026-09-02T21:30:00Z'),
+        },
+      });
+      await platform.orderItem.create({
+        data: {
+          organizationId,
+          orderId: order.id,
+          tabId: tab.id,
+          unitId,
+          productId: product.id,
+          productName: product.name,
+          unitPriceCents: 600,
+          quantity: 3,
+          position: 0,
+          prepStationId: kitchen.id,
+          stageId: final.id,
+          stageEnteredAt: new Date('2026-09-02T21:30:00Z'),
+        },
+      });
+      const withDays = await admin.call('get', `${API}/admin/organizations/${body.id}`).expect(200);
+      expect((withDays.body as { recentOperationDays: unknown }).recentOperationDays).toEqual([
+        { unitId, unitName: body.units[0]?.name, businessDate: '2026-09-02', salesCents: 1800 },
+        { unitId, unitName: body.units[0]?.name, businessDate: '2026-09-01', salesCents: 0 },
+      ]);
       await admin.call('get', `${API}/admin/organizations/${crypto.randomUUID()}`).expect(404);
       await admin.call('get', `${API}/admin/organizations/nao-e-uuid`).expect(400);
     });

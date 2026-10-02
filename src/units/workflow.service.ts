@@ -6,7 +6,7 @@ import { requireOrganizationId } from '../context/request-context.js';
 import type { Unit } from '../generated/prisma/client.js';
 import type { WorkflowStageTarget } from '../generated/prisma/enums.js';
 import { PrismaService, type TenantDb } from '../prisma/prisma.service.js';
-import { OpenShiftChecker } from './open-shift.js';
+import { OperationGuard } from './operation-guard.js';
 import { setupError } from './setup-errors.js';
 import { SetupEvents } from './setup-events.js';
 import { requireUnit } from './stations.service.js';
@@ -28,7 +28,7 @@ const SORT_ORDER_SHIFT = 100_000;
  * The workflow of a unit (spec 03, section 4.2): read, and saved at once (`PUT`), validated by
  * RN-03.05 to RN-03.07.
  *
- * Stage ids are kept: a stage sent with its `id` is updated in place, so items of past shifts still
+ * Stage ids are kept: a stage sent with its `id` is updated in place, so items of past days still
  * point to it (spec 04); a current stage left out of the request is archived (`archived_at`), never
  * deleted. Positions are rewritten 1..n in the order of the request.
  */
@@ -37,7 +37,7 @@ export class WorkflowService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
-    private readonly shifts: OpenShiftChecker,
+    private readonly guard: OperationGuard,
     private readonly events: SetupEvents,
     private readonly units: UnitAccessService,
   ) {}
@@ -57,8 +57,8 @@ export class WorkflowService {
   ): Promise<WorkflowDto> {
     return this.prisma.transaction(async (db) => {
       const current = await requireUnit(db, unitId);
-      // CA-03.03 / RN-03.07.
-      await this.shifts.assertNoOpenShift(db, unitId);
+      // CA-03.03 / RN-03.07: no open cash register and no item in preparation.
+      await this.guard.assertCanChangeFlow(db, unitId);
       // Bumps the version first: it locks the unit row, so two saves never interleave, and
       // answers VERSION_CONFLICT when the app saw an older workflow.
       const unit = await updateWithVersion<Unit>(db.unit, {

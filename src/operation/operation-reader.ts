@@ -1,23 +1,21 @@
+import { isoDateOf } from '../common/time.js';
 import type {
   OrderItem,
   OrderItemModifier,
   Prisma,
-  Shift,
-  ShiftAgreement,
-  ShiftPrice,
   Tab,
   WorkflowStage,
 } from '../generated/prisma/client.js';
 import type { ActorType } from '../generated/prisma/enums.js';
 import { AppError } from '../errors/app-error.js';
 import type { TenantDb } from '../prisma/prisma.service.js';
+import { defaultTimeLimits, type TimeLimits } from '../units/time-limits.js';
 import { isLate, lateAtOf, lineTotalCents, tabTotals } from './order-rules.js';
 import { paidCents } from './payment-rules.js';
 import type {
   OrderDto,
   OrderItemDto,
   PaymentDto,
-  ShiftDto,
   TabDto,
   TabSummaryDto,
 } from './operation.schemas.js';
@@ -42,7 +40,8 @@ export const itemOrder = [{ position: 'asc' as const }, { id: 'asc' as const }];
 /** Workflow of a unit, as the operation needs it. */
 export interface UnitFlow {
   unitId: string;
-  lateAfterMinutes: number;
+  /** Limits of a station by id (RN-03.25); the unit default for a station without them. */
+  limitsOf: (stationId: string | null) => TimeLimits;
   /** Active stages in order. */
   stages: WorkflowStage[];
   first: WorkflowStage;
@@ -52,13 +51,27 @@ export interface UnitFlow {
 }
 
 export async function loadUnitFlow(db: TenantDb, unitId: string): Promise<UnitFlow> {
-  const [unit, stages] = await Promise.all([
+  const [unit, stages, stations] = await Promise.all([
     db.unit.findUniqueOrThrow({ where: { id: unitId }, select: { lateAfterMinutes: true } }),
     db.workflowStage.findMany({
       where: { unitId, archivedAt: null },
       orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }],
     }),
+    db.station.findMany({
+      where: { unitId },
+      select: { id: true, attentionAfterMinutes: true, lateAfterMinutes: true },
+    }),
   ]);
+  const fallback = defaultTimeLimits(unit.lateAfterMinutes);
+  const limits = new Map<string, TimeLimits>();
+  for (const station of stations) {
+    if (station.attentionAfterMinutes !== null && station.lateAfterMinutes !== null) {
+      limits.set(station.id, {
+        attentionAfterMinutes: station.attentionAfterMinutes,
+        lateAfterMinutes: station.lateAfterMinutes,
+      });
+    }
+  }
   const first = stages[0];
   const final = stages.at(-1);
   if (!first || !final?.isFinal) {
@@ -69,7 +82,7 @@ export async function loadUnitFlow(db: TenantDb, unitId: string): Promise<UnitFl
   }
   return {
     unitId,
-    lateAfterMinutes: unit.lateAfterMinutes,
+    limitsOf: (stationId) => (stationId === null ? undefined : limits.get(stationId)) ?? fallback,
     stages,
     first,
     final,
@@ -97,11 +110,19 @@ function actorRef(type: ActorType, id: string | null): { type: ActorType; id: st
   return { type, id };
 }
 
-export function toOrderItemDto(row: ItemRow, lateAfterMinutes: number, now: Date): OrderItemDto {
-  const lateAt = lateAtOf(
-    { canceledAt: row.canceledAt, inFinalStage: row.stage.isFinal, sentAt: row.order.sentAt },
-    lateAfterMinutes,
-  );
+/**
+ * RN-04.23: the item is in attention or late by the limits of its preparation station (the counter
+ * has no limits of its own; at a station, the card uses the limits of that station, RN-04.46).
+ */
+export function toOrderItemDto(row: ItemRow, flow: UnitFlow, now: Date): OrderItemDto {
+  const limits = flow.limitsOf(row.prepStationId);
+  const line = {
+    canceledAt: row.canceledAt,
+    inFinalStage: row.stage.isFinal,
+    sentAt: row.order.sentAt,
+  };
+  const attentionAt = lateAtOf(line, limits.attentionAfterMinutes);
+  const lateAt = lateAtOf(line, limits.lateAfterMinutes);
   return {
     id: row.id,
     orderId: row.orderId,
@@ -113,6 +134,7 @@ export function toOrderItemDto(row: ItemRow, lateAfterMinutes: number, now: Date
     productId: row.productId,
     productName: row.productName,
     unitPriceCents: row.unitPriceCents,
+    priceListId: row.priceListId,
     quantity: row.quantity,
     note: row.note,
     modifiers: row.modifiers.map(toModifierDto),
@@ -124,9 +146,12 @@ export function toOrderItemDto(row: ItemRow, lateAfterMinutes: number, now: Date
     stageIsFinal: row.stage.isFinal,
     stageEnteredAt: row.stageEnteredAt.toISOString(),
     sentAt: row.order.sentAt.toISOString(),
+    attentionAt: attentionAt?.toISOString() ?? null,
     lateAt: lateAt?.toISOString() ?? null,
     isLate: isLate(lateAt, now),
     canceledAt: row.canceledAt?.toISOString() ?? null,
+    canceledBusinessDate:
+      row.canceledBusinessDate === null ? null : isoDateOf(row.canceledBusinessDate),
     canceledBy: row.canceledByType === null ? null : actorRef(row.canceledByType, row.canceledById),
     cancelReason: row.cancelReason,
     wasted: row.wasted,
@@ -153,17 +178,14 @@ export async function loadItem(
   if (!row) {
     throw AppError.of('NOT_FOUND');
   }
-  const unit = await db.unit.findUniqueOrThrow({
-    where: { id: row.unitId },
-    select: { lateAfterMinutes: true },
-  });
-  return toOrderItemDto(row, unit.lateAfterMinutes, now);
+  return toOrderItemDto(row, await loadUnitFlow(db, row.unitId), now);
 }
 
+/** Orders of one unit (`flow`), oldest first, with their lines. */
 export async function loadOrders(
   db: TenantDb,
   where: Prisma.OrderWhereInput,
-  lateAfterMinutes: number,
+  flow: UnitFlow,
   now = new Date(),
 ): Promise<OrderDto[]> {
   const orders = await db.order.findMany({
@@ -179,7 +201,6 @@ export async function loadOrders(
   return orders.map((order) => ({
     id: order.id,
     tabId: order.tabId,
-    shiftId: order.shiftId,
     unitId: order.tab.unitId,
     tabNumber: order.tab.number,
     customerName: order.tab.customerName,
@@ -190,7 +211,7 @@ export async function loadOrders(
     completedAt: order.completedAt?.toISOString() ?? null,
     items: items
       .filter((item) => item.orderId === order.id)
-      .map((item) => toOrderItemDto(item, lateAfterMinutes, now)),
+      .map((item) => toOrderItemDto(item, flow, now)),
     version: order.version,
   }));
 }
@@ -257,12 +278,13 @@ function toTabSummary(
   const totals = tabTotals(lines, { type: tab.discountType, value: tab.discountValue });
   const active = lines.filter((line) => line.canceledAt === null);
   const units = (rows: readonly ItemRow[]) => rows.reduce((sum, row) => sum + row.quantity, 0);
-  const lateAfterMinutes = flow?.lateAfterMinutes ?? 0;
   return {
     id: tab.id,
-    shiftId: tab.shiftId,
     unitId: tab.unitId,
     number: tab.number,
+    businessDate: isoDateOf(tab.businessDate),
+    closedBusinessDate: tab.closedBusinessDate === null ? null : isoDateOf(tab.closedBusinessDate),
+    eventId: tab.eventId,
     customerName: tab.customerName,
     mode: tab.mode,
     status: tab.status,
@@ -278,7 +300,7 @@ function toTabSummary(
         isLate(
           lateAtOf(
             { canceledAt: null, inFinalStage: line.stage.isFinal, sentAt: line.order.sentAt },
-            lateAfterMinutes,
+            flow?.limitsOf(line.prepStationId).lateAfterMinutes ?? 0,
           ),
           now,
         ),
@@ -317,13 +339,14 @@ export async function loadTabSummary(
 export async function loadTab(db: TenantDb, tabId: string, now = new Date()): Promise<TabDto> {
   const summary = await loadTabSummary(db, tabId, now);
   const flow = await loadUnitFlow(db, summary.unitId);
-  const orders = await loadOrders(db, { tabId }, flow.lateAfterMinutes, now);
+  const orders = await loadOrders(db, { tabId }, flow, now);
   const payments = await loadPayments(db, { tabId });
   return { ...summary, orders, payments };
 }
 
 export const paymentInclude = {
   tab: { select: { number: true, customerName: true } },
+  session: { select: { cashRegisterId: true, cashRegister: { select: { name: true } } } },
 } satisfies Prisma.PaymentInclude;
 
 export type PaymentRow = Prisma.PaymentGetPayload<{ include: typeof paymentInclude }>;
@@ -334,8 +357,9 @@ export function toPaymentDto(row: PaymentRow): PaymentDto {
     tabId: row.tabId,
     tabNumber: row.tab.number,
     customerName: row.tab.customerName,
-    shiftId: row.shiftId,
-    cashRegisterId: row.cashRegisterId,
+    cashRegisterSessionId: row.cashRegisterSessionId,
+    cashRegisterId: row.session.cashRegisterId,
+    cashRegisterName: row.session.cashRegister.name,
     method: row.method,
     amountCents: row.amountCents,
     tenderedCents: row.tenderedCents,
@@ -362,51 +386,6 @@ export async function loadPayments(
   return rows.map(toPaymentDto);
 }
 
-type ShiftRow = Shift & { agreement: ShiftAgreement | null; prices: ShiftPrice[] };
-
-export const shiftInclude = {
-  agreement: true,
-  prices: { orderBy: { productId: 'asc' } },
-} satisfies Prisma.ShiftInclude;
-
-export function toShiftDto(shift: ShiftRow): ShiftDto {
-  const agreement = shift.agreement;
-  return {
-    id: shift.id,
-    unitId: shift.unitId,
-    type: shift.type,
-    status: shift.status,
-    openedAt: shift.openedAt.toISOString(),
-    openedBy: actorRef(shift.openedByType, shift.openedById),
-    closedAt: shift.closedAt?.toISOString() ?? null,
-    closedBy: shift.closedByType === null ? null : actorRef(shift.closedByType, shift.closedById),
-    agreement:
-      agreement === null
-        ? null
-        : {
-            contractorName: agreement.contractorName,
-            modality: agreement.modality,
-            agreedAmountCents: agreement.agreedAmountCents,
-            agreedQuantity: agreement.agreedQuantity,
-            limits: agreement.limits,
-            notes: agreement.notes,
-          },
-    prices: shift.prices.map((price) => ({
-      productId: price.productId,
-      priceCents: price.priceCents,
-    })),
-    version: shift.version,
-  };
-}
-
-export async function loadShift(db: TenantDb, shiftId: string): Promise<ShiftDto> {
-  const shift = await db.shift.findUnique({ where: { id: shiftId }, include: shiftInclude });
-  if (!shift) {
-    throw AppError.of('NOT_FOUND');
-  }
-  return toShiftDto(shift);
-}
-
 /** Fields of a line copied by a split (RN-04.24, RN-04.26): the same copy of what was sold. */
 export function splitCopy(
   item: OrderItem,
@@ -422,6 +401,7 @@ export function splitCopy(
     productId: item.productId,
     productName: item.productName,
     unitPriceCents: item.unitPriceCents,
+    priceListId: item.priceListId,
     note: item.note,
     position: item.position,
     prepStationId: item.prepStationId,

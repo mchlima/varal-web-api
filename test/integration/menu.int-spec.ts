@@ -398,6 +398,8 @@ describe.skipIf(!databaseUrl)('menu (spec 03, section 5)', () => {
           name: `Fila ${unique()}`,
           kind: 'queue',
           sortOrder: 99,
+          attentionAfterMinutes: 7,
+          lateAfterMinutes: 15,
         },
       });
     }
